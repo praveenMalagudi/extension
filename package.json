@@ -1,0 +1,137 @@
+{
+  "name": "agent-change-guard",
+  "displayName": "Agent Change Guard",
+  "description": "Track, diff, and revert file changes made during an AI agent session (Claude Code, Codex, Cursor Agent).",
+  "version": "0.0.1",
+  "publisher": "agent-change-guard",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other",
+    "SCM Providers"
+  ],
+  "activationEvents": [],
+  "main": "./out/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "agentChangeGuard",
+          "title": "Agent Changes",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "agentChangeGuard": [
+        {
+          "id": "agentChangesView",
+          "name": "Agent Sessions"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "agentChangesView",
+        "contents": "No agent sessions yet.\n[Start Session](command:agentChangeGuard.startSession)"
+      }
+    ],
+    "commands": [
+      {
+        "command": "agentChangeGuard.startSession",
+        "title": "Agent Change Guard: Start Session",
+        "icon": "$(add)"
+      },
+      {
+        "command": "agentChangeGuard.endSession",
+        "title": "Agent Change Guard: End Session"
+      },
+      {
+        "command": "agentChangeGuard.openDiff",
+        "title": "Agent Change Guard: Open Diff",
+        "icon": "$(diff)"
+      },
+      {
+        "command": "agentChangeGuard.revertFile",
+        "title": "Agent Change Guard: Revert File",
+        "icon": "$(discard)"
+      },
+      {
+        "command": "agentChangeGuard.revertSession",
+        "title": "Agent Change Guard: Revert Session"
+      },
+      {
+        "command": "agentChangeGuard.markAccepted",
+        "title": "Agent Change Guard: Mark as Accepted",
+        "icon": "$(check)"
+      },
+      {
+        "command": "agentChangeGuard.refresh",
+        "title": "Agent Change Guard: Refresh",
+        "icon": "$(refresh)"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "agentChangeGuard.startSession",
+          "when": "view == agentChangesView",
+          "group": "navigation@1"
+        },
+        {
+          "command": "agentChangeGuard.refresh",
+          "when": "view == agentChangesView",
+          "group": "navigation@2"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "agentChangeGuard.endSession",
+          "when": "view == agentChangesView && viewItem == agentSession.active",
+          "group": "1_session@1"
+        },
+        {
+          "command": "agentChangeGuard.markAccepted",
+          "when": "view == agentChangesView && viewItem =~ /^agentSession/",
+          "group": "1_session@2"
+        },
+        {
+          "command": "agentChangeGuard.revertSession",
+          "when": "view == agentChangesView && viewItem =~ /^agentSession/",
+          "group": "1_session@3"
+        },
+        {
+          "command": "agentChangeGuard.openDiff",
+          "when": "view == agentChangesView && viewItem == agentChangedFile",
+          "group": "inline@1"
+        },
+        {
+          "command": "agentChangeGuard.revertFile",
+          "when": "view == agentChangesView && viewItem == agentChangedFile",
+          "group": "inline@2"
+        },
+        {
+          "command": "agentChangeGuard.openDiff",
+          "when": "view == agentChangesView && viewItem == agentChangedFile",
+          "group": "1_file@1"
+        },
+        {
+          "command": "agentChangeGuard.revertFile",
+          "when": "view == agentChangesView && viewItem == agentChangedFile",
+          "group": "1_file@2"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "devDependencies": {
+    "@types/node": "^18.19.0",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.4.0"
+  }
+}
