@@ -15,12 +15,46 @@ export interface AgentChangedFile {
   status: ChangeStatus;
 }
 
+/** A file's state as captured at the end of a checkpoint interval. */
+export interface CheckpointFile {
+  /** Workspace-relative path (POSIX separators). */
+  path: string;
+  /** Status relative to the file's state at the previous checkpoint. */
+  status: ChangeStatus;
+  /**
+   * Content-addressed blob holding the file's bytes at checkpoint time.
+   * Undefined for deleted files and for files over the size limit
+   * (those cannot be diffed or restored for this checkpoint).
+   */
+  blobHash?: string;
+}
+
+/**
+ * A checkpoint marks an agent-turn boundary (one user message → one turn of
+ * work). It records every file that changed since the previous checkpoint
+ * (or since the session baseline, for the first one).
+ */
+export interface Checkpoint {
+  id: string;
+  /** Usually the user message that started the turn. */
+  label: string;
+  createdAt: number;
+  files: CheckpointFile[];
+}
+
 export interface AgentSession {
   id: string;
   title: string;
   agent: AgentType;
   startedAt: number;
   endedAt?: number;
+  /** Cumulative changes vs the session baseline. */
   changedFiles: AgentChangedFile[];
+  /** Turn-by-turn history. Empty for purely manual sessions. */
+  checkpoints: Checkpoint[];
+  /** Changes since the last checkpoint (the in-progress turn). */
+  pendingFiles: AgentChangedFile[];
+  /** Label for the in-progress turn (the latest user message). */
+  currentTurnLabel?: string;
   status: SessionStatus;
 }

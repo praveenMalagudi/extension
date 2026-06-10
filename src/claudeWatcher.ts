@@ -1,0 +1,224 @@
+import * as fs from "fs";
+import * as fsp from "fs/promises";
+import * as os from "os";
+import * as path from "path";
+import * as vscode from "vscode";
+import { SessionManager } from "./sessionManager";
+import { getWorkspaceFolder } from "./utils";
+
+const POLL_MS = 2000;
+const MAX_LABEL_LENGTH = 80;
+
+/**
+ * Watches Claude Code's transcript files for this workspace and turns every
+ * user message into a checkpoint boundary on the active session.
+ *
+ * Claude Code writes one JSONL file per conversation under
+ * `~/.claude/projects/<sanitized-workspace-path>/`. We tail those files:
+ * whenever a new user prompt appears, the changes accumulated so far belong
+ * to the *previous* turn, so they are folded into a checkpoint labelled with
+ * that turn's message.
+ *
+ * Optionally (off by default) a session is auto-started on the first message
+ * when none is active.
+ */
+export class ClaudeWatcher implements vscode.Disposable {
+  private timer: NodeJS.Timeout | undefined;
+  /** Bytes already consumed per transcript file. */
+  private readonly offsets = new Map<string, number>();
+  /** Partial trailing line per transcript file. */
+  private readonly remainders = new Map<string, string>();
+  private initialized = false;
+  private busy = false;
+
+  constructor(private readonly sessions: SessionManager) {
+    this.timer = setInterval(() => void this.poll(), POLL_MS);
+  }
+
+  /** `/Users/me/proj` -> `-Users-me-proj`, matching Claude Code's layout. */
+  private transcriptDir(): string | undefined {
+    const folder = getWorkspaceFolder();
+    if (!folder) {
+      return undefined;
+    }
+    const sanitized = folder.uri.fsPath.replace(/[^a-zA-Z0-9]/g, "-");
+    return path.join(os.homedir(), ".claude", "projects", sanitized);
+  }
+
+  private config(): vscode.WorkspaceConfiguration {
+    return vscode.workspace.getConfiguration("agentChangeGuard.claudeCode");
+  }
+
+  private async poll(): Promise<void> {
+    if (this.busy) {
+      return;
+    }
+    this.busy = true;
+    try {
+      await this.scan();
+    } catch {
+      // Never let transcript parsing break the extension.
+    } finally {
+      this.busy = false;
+    }
+  }
+
+  private async scan(): Promise<void> {
+    if (!this.config().get<boolean>("autoCheckpoint", true)) {
+      return;
+    }
+    const dir = this.transcriptDir();
+    if (!dir) {
+      return;
+    }
+    let entries: string[];
+    try {
+      entries = await fsp.readdir(dir);
+    } catch {
+      return; // Claude Code never used in this workspace.
+    }
+    const transcripts = entries.filter((e) => e.endsWith(".jsonl"));
+
+    // First scan: record current sizes without processing, so history from
+    // before the extension loaded is not replayed as new messages.
+    if (!this.initialized) {
+      for (const name of transcripts) {
+        const size = await this.fileSize(path.join(dir, name));
+        this.offsets.set(name, size);
+      }
+      this.initialized = true;
+      return;
+    }
+
+    for (const name of transcripts) {
+      const file = path.join(dir, name);
+      const size = await this.fileSize(file);
+      const offset = this.offsets.get(name) ?? 0;
+      if (size <= offset) {
+        if (size < offset) {
+          this.offsets.set(name, size); // truncated/rotated
+        }
+        continue;
+      }
+      const chunk = await this.readRange(file, offset, size);
+      this.offsets.set(name, size);
+      if (chunk === undefined) {
+        continue;
+      }
+      const text = (this.remainders.get(name) ?? "") + chunk;
+      const lines = text.split("\n");
+      this.remainders.set(name, lines.pop() ?? "");
+      for (const line of lines) {
+        const prompt = extractUserPrompt(line);
+        if (prompt) {
+          await this.onUserPrompt(prompt);
+        }
+      }
+    }
+  }
+
+  private async onUserPrompt(prompt: string): Promise<void> {
+    const label = truncate(prompt, MAX_LABEL_LENGTH);
+    const session = this.sessions.getActiveSession();
+    if (session) {
+      await this.sessions.beginTurn(session, label);
+      return;
+    }
+    if (this.config().get<boolean>("autoStartSession", false)) {
+      try {
+        const started = await this.sessions.startSession(label, "claude");
+        await this.sessions.beginTurn(started, label);
+        vscode.window.showInformationMessage(
+          `Agent Change Guard: started session for Claude Code — "${label}"`,
+        );
+      } catch {
+        // A session raced into existence; ignore.
+      }
+    }
+  }
+
+  private async fileSize(file: string): Promise<number> {
+    try {
+      return (await fsp.stat(file)).size;
+    } catch {
+      return 0;
+    }
+  }
+
+  private async readRange(
+    file: string,
+    start: number,
+    end: number,
+  ): Promise<string | undefined> {
+    let handle: fsp.FileHandle | undefined;
+    try {
+      handle = await fsp.open(file, "r");
+      const buf = Buffer.alloc(end - start);
+      const { bytesRead } = await handle.read(buf, 0, buf.length, start);
+      return buf.subarray(0, bytesRead).toString("utf8");
+    } catch {
+      return undefined;
+    } finally {
+      await handle?.close();
+    }
+  }
+
+  dispose(): void {
+    if (this.timer) {
+      clearInterval(this.timer);
+      this.timer = undefined;
+    }
+  }
+}
+
+/**
+ * Extract the text of a genuine user prompt from one transcript JSONL line.
+ * Returns undefined for assistant turns, tool results, meta entries, and
+ * slash-command bookkeeping.
+ */
+export function extractUserPrompt(line: string): string | undefined {
+  const trimmed = line.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+  let entry: any;
+  try {
+    entry = JSON.parse(trimmed);
+  } catch {
+    return undefined;
+  }
+  if (entry?.type !== "user" || entry.isMeta) {
+    return undefined;
+  }
+  const message = entry.message;
+  if (!message || message.role !== "user") {
+    return undefined;
+  }
+  let text: string | undefined;
+  if (typeof message.content === "string") {
+    text = message.content;
+  } else if (Array.isArray(message.content)) {
+    // Tool results arrive as user-role entries; those are not prompts.
+    if (message.content.some((c: any) => c?.type === "tool_result")) {
+      return undefined;
+    }
+    text = message.content
+      .filter((c: any) => c?.type === "text" && typeof c.text === "string")
+      .map((c: any) => c.text)
+      .join(" ");
+  }
+  if (!text) {
+    return undefined;
+  }
+  text = text.trim();
+  // Slash commands and harness bookkeeping start with tag markup.
+  if (!text || text.startsWith("<")) {
+    return undefined;
+  }
+  return text;
+}
+
+function truncate(text: string, max: number): string {
+  const oneLine = text.replace(/\s+/g, " ").trim();
+  return oneLine.length <= max ? oneLine : `${oneLine.slice(0, max - 1)}…`;
+}

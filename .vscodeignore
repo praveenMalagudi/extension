@@ -5,3 +5,7 @@ src/**
 tsconfig.json
 .gitignore
 node_modules/**
+out/**
+*.vsix
+media/icon-source.svg
+!out/extension.js

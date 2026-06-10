@@ -4,7 +4,7 @@
     {
       "type": "npm",
       "script": "compile",
-      "problemMatcher": ["$tsc"],
+      "problemMatcher": [],
       "group": {
         "kind": "build",
         "isDefault": true
@@ -13,8 +13,15 @@
     },
     {
       "type": "npm",
+      "script": "typecheck",
+      "problemMatcher": ["$tsc"],
+      "group": "build",
+      "label": "npm: typecheck"
+    },
+    {
+      "type": "npm",
       "script": "watch",
-      "problemMatcher": ["$tsc-watch"],
+      "problemMatcher": [],
       "isBackground": true,
       "group": "build",
       "label": "npm: watch"

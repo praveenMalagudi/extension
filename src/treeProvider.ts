@@ -1,11 +1,38 @@
 import * as vscode from "vscode";
 import { SessionManager } from "./sessionManager";
-import { AgentChangedFile, AgentSession, ChangeStatus } from "./types";
+import {
+  AgentChangedFile,
+  AgentSession,
+  ChangeStatus,
+  Checkpoint,
+} from "./types";
 
-/** A node is either a session (root) or a changed file (leaf). */
+/**
+ * Tree shape:
+ *   session
+ *   ├─ checkpoint #1 (one per agent turn)      — only when checkpoints exist
+ *   │   └─ file (diff = that turn's pre ↔ post)
+ *   ├─ "Current turn" group (pending changes)  — only when checkpoints exist
+ *   │   └─ file (diff = baseline ↔ current)
+ *   └─ file (diff = baseline ↔ current)        — flat, when no checkpoints
+ */
 export type TreeNode =
   | { kind: "session"; session: AgentSession }
-  | { kind: "file"; sessionId: string; file: AgentChangedFile };
+  | {
+      kind: "checkpoint";
+      sessionId: string;
+      index: number;
+      checkpoint: Checkpoint;
+    }
+  | { kind: "pendingGroup"; session: AgentSession }
+  | {
+      kind: "file";
+      sessionId: string;
+      file: AgentChangedFile;
+      /** Set when the file belongs to a checkpoint (turn diff). */
+      checkpointIndex?: number;
+      blobHash?: string;
+    };
 
 const STATUS_LABEL: Record<ChangeStatus, string> = {
   created: "Created",
@@ -32,10 +59,16 @@ export class AgentTreeProvider implements vscode.TreeDataProvider<TreeNode> {
   }
 
   getTreeItem(node: TreeNode): vscode.TreeItem {
-    if (node.kind === "session") {
-      return this.sessionItem(node.session);
+    switch (node.kind) {
+      case "session":
+        return this.sessionItem(node.session);
+      case "checkpoint":
+        return this.checkpointItem(node.index, node.checkpoint);
+      case "pendingGroup":
+        return this.pendingGroupItem(node.session);
+      case "file":
+        return this.fileItem(node);
     }
-    return this.fileItem(node.sessionId, node.file);
   }
 
   getChildren(node?: TreeNode): TreeNode[] {
@@ -45,7 +78,42 @@ export class AgentTreeProvider implements vscode.TreeDataProvider<TreeNode> {
         .map((session) => ({ kind: "session", session }) as TreeNode);
     }
     if (node.kind === "session") {
-      return node.session.changedFiles.map(
+      const session = node.session;
+      if (session.checkpoints.length === 0) {
+        // Manual session without turn boundaries: flat cumulative list.
+        return session.changedFiles.map(
+          (file) =>
+            ({ kind: "file", sessionId: session.id, file }) as TreeNode,
+        );
+      }
+      const children: TreeNode[] = session.checkpoints.map(
+        (checkpoint, index) =>
+          ({
+            kind: "checkpoint",
+            sessionId: session.id,
+            index,
+            checkpoint,
+          }) as TreeNode,
+      );
+      if (session.pendingFiles.length > 0 || session.status === "active") {
+        children.push({ kind: "pendingGroup", session });
+      }
+      return children;
+    }
+    if (node.kind === "checkpoint") {
+      return node.checkpoint.files.map(
+        (file) =>
+          ({
+            kind: "file",
+            sessionId: node.sessionId,
+            file: { path: file.path, status: file.status },
+            checkpointIndex: node.index,
+            blobHash: file.blobHash,
+          }) as TreeNode,
+      );
+    }
+    if (node.kind === "pendingGroup") {
+      return node.session.pendingFiles.map(
         (file) =>
           ({
             kind: "file",
@@ -63,9 +131,10 @@ export class AgentTreeProvider implements vscode.TreeDataProvider<TreeNode> {
       vscode.TreeItemCollapsibleState.Expanded,
     );
     const count = session.changedFiles.length;
-    item.description = `${session.status} · ${count} file${
-      count === 1 ? "" : "s"
-    }`;
+    const turns = session.checkpoints.length;
+    item.description =
+      `${session.status} · ${count} file${count === 1 ? "" : "s"}` +
+      (turns > 0 ? ` · ${turns} turn${turns === 1 ? "" : "s"}` : "");
     item.tooltip = new vscode.MarkdownString(
       `**${session.title}**\n\n` +
         `Agent: ${session.agent}\n\n` +
@@ -83,22 +152,59 @@ export class AgentTreeProvider implements vscode.TreeDataProvider<TreeNode> {
     return item;
   }
 
-  private fileItem(
-    sessionId: string,
-    file: AgentChangedFile,
+  private checkpointItem(
+    index: number,
+    checkpoint: Checkpoint,
   ): vscode.TreeItem {
+    const item = new vscode.TreeItem(
+      `${index + 1}. ${checkpoint.label}`,
+      vscode.TreeItemCollapsibleState.Collapsed,
+    );
+    const count = checkpoint.files.length;
+    item.description = `${count} file${count === 1 ? "" : "s"}`;
+    item.tooltip = new vscode.MarkdownString(
+      `**${checkpoint.label}**\n\n` +
+        `${new Date(checkpoint.createdAt).toLocaleString()}\n\n` +
+        `Right-click to restore the workspace to this point.`,
+    );
+    item.iconPath = new vscode.ThemeIcon("milestone");
+    item.contextValue = "agentCheckpoint";
+    return item;
+  }
+
+  private pendingGroupItem(session: AgentSession): vscode.TreeItem {
+    const count = session.pendingFiles.length;
+    const item = new vscode.TreeItem(
+      session.currentTurnLabel ?? "Current turn",
+      count > 0
+        ? vscode.TreeItemCollapsibleState.Expanded
+        : vscode.TreeItemCollapsibleState.None,
+    );
+    item.description = `in progress · ${count} file${count === 1 ? "" : "s"}`;
+    item.iconPath = new vscode.ThemeIcon("loading~spin");
+    item.contextValue = "agentPendingGroup";
+    return item;
+  }
+
+  private fileItem(
+    node: Extract<TreeNode, { kind: "file" }>,
+  ): vscode.TreeItem {
+    const { file } = node;
     const item = new vscode.TreeItem(
       file.path,
       vscode.TreeItemCollapsibleState.None,
     );
     item.description = STATUS_LABEL[file.status];
     item.iconPath = new vscode.ThemeIcon(STATUS_ICON[file.status]);
-    item.contextValue = "agentChangedFile";
+    item.contextValue =
+      node.checkpointIndex === undefined
+        ? "agentChangedFile"
+        : "agentCheckpointFile";
     // Clicking the row opens the diff.
     item.command = {
       command: "agentChangeGuard.openDiff",
       title: "Open Diff",
-      arguments: [{ kind: "file", sessionId, file } as TreeNode],
+      arguments: [node],
     };
     return item;
   }

@@ -1,9 +1,11 @@
 {
   "name": "agent-change-guard",
   "displayName": "Agent Change Guard",
-  "description": "Track, diff, and revert file changes made during an AI agent session (Claude Code, Codex, Cursor Agent).",
-  "version": "0.0.1",
+  "description": "Track, diff, and revert file changes made during an AI agent session (Claude Code, Codex, Cursor Agent) — without touching git.",
+  "version": "0.2.0",
   "publisher": "agent-change-guard",
+  "license": "MIT",
+  "icon": "media/icon.png",
   "engines": {
     "vscode": "^1.85.0"
   },
@@ -11,6 +13,22 @@
     "Other",
     "SCM Providers"
   ],
+  "keywords": [
+    "ai",
+    "agent",
+    "claude",
+    "cursor",
+    "copilot",
+    "diff",
+    "revert",
+    "checkpoint",
+    "snapshot",
+    "undo"
+  ],
+  "galleryBanner": {
+    "color": "#1e2430",
+    "theme": "dark"
+  },
   "activationEvents": [],
   "main": "./out/extension.js",
   "contributes": {
@@ -37,6 +55,54 @@
         "contents": "No agent sessions yet.\n[Start Session](command:agentChangeGuard.startSession)"
       }
     ],
+    "configuration": {
+      "title": "Agent Change Guard",
+      "properties": {
+        "agentChangeGuard.ignoreDirectories": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "node_modules",
+            ".git",
+            ".next",
+            "dist",
+            "build",
+            "out",
+            "coverage",
+            ".venv",
+            "venv",
+            "__pycache__",
+            "target",
+            "vendor"
+          ],
+          "description": "Directory names that are never tracked or snapshotted."
+        },
+        "agentChangeGuard.respectGitignore": {
+          "type": "boolean",
+          "default": true,
+          "description": "Also ignore files matched by the workspace root .gitignore."
+        },
+        "agentChangeGuard.maxFileSizeMB": {
+          "type": "number",
+          "default": 5,
+          "minimum": 1,
+          "maximum": 100,
+          "description": "Files larger than this (in MB) are not snapshotted and cannot be reverted."
+        },
+        "agentChangeGuard.claudeCode.autoCheckpoint": {
+          "type": "boolean",
+          "default": true,
+          "description": "While a session is active, watch Claude Code transcripts and create a checkpoint for every agent turn (one per user message)."
+        },
+        "agentChangeGuard.claudeCode.autoStartSession": {
+          "type": "boolean",
+          "default": false,
+          "description": "Automatically start a session when Claude Code receives a message and no session is active. Snapshots the workspace, which can take a moment on large projects."
+        }
+      }
+    },
     "commands": [
       {
         "command": "agentChangeGuard.startSession",
@@ -46,6 +112,16 @@
       {
         "command": "agentChangeGuard.endSession",
         "title": "Agent Change Guard: End Session"
+      },
+      {
+        "command": "agentChangeGuard.createCheckpoint",
+        "title": "Agent Change Guard: Create Checkpoint",
+        "icon": "$(milestone)"
+      },
+      {
+        "command": "agentChangeGuard.restoreCheckpoint",
+        "title": "Agent Change Guard: Restore To Checkpoint",
+        "icon": "$(history)"
       },
       {
         "command": "agentChangeGuard.openDiff",
@@ -67,6 +143,11 @@
         "icon": "$(check)"
       },
       {
+        "command": "agentChangeGuard.removeSession",
+        "title": "Agent Change Guard: Remove Session",
+        "icon": "$(trash)"
+      },
+      {
         "command": "agentChangeGuard.refresh",
         "title": "Agent Change Guard: Refresh",
         "icon": "$(refresh)"
@@ -80,9 +161,14 @@
           "group": "navigation@1"
         },
         {
-          "command": "agentChangeGuard.refresh",
+          "command": "agentChangeGuard.createCheckpoint",
           "when": "view == agentChangesView",
           "group": "navigation@2"
+        },
+        {
+          "command": "agentChangeGuard.refresh",
+          "when": "view == agentChangesView",
+          "group": "navigation@3"
         }
       ],
       "view/item/context": [
@@ -100,6 +186,21 @@
           "command": "agentChangeGuard.revertSession",
           "when": "view == agentChangesView && viewItem =~ /^agentSession/",
           "group": "1_session@3"
+        },
+        {
+          "command": "agentChangeGuard.removeSession",
+          "when": "view == agentChangesView && viewItem == agentSession",
+          "group": "1_session@4"
+        },
+        {
+          "command": "agentChangeGuard.restoreCheckpoint",
+          "when": "view == agentChangesView && viewItem == agentCheckpoint",
+          "group": "1_checkpoint@1"
+        },
+        {
+          "command": "agentChangeGuard.openDiff",
+          "when": "view == agentChangesView && viewItem == agentCheckpointFile",
+          "group": "inline@1"
         },
         {
           "command": "agentChangeGuard.openDiff",
@@ -125,13 +226,20 @@
     }
   },
   "scripts": {
-    "vscode:prepublish": "npm run compile",
-    "compile": "tsc -p ./",
-    "watch": "tsc -watch -p ./"
+    "vscode:prepublish": "npm run typecheck && npm run build",
+    "build": "esbuild src/extension.ts --bundle --outfile=out/extension.js --external:vscode --format=cjs --platform=node --minify",
+    "compile": "esbuild src/extension.ts --bundle --outfile=out/extension.js --external:vscode --format=cjs --platform=node --sourcemap",
+    "watch": "esbuild src/extension.ts --bundle --outfile=out/extension.js --external:vscode --format=cjs --platform=node --sourcemap --watch",
+    "typecheck": "tsc -p ./ --noEmit",
+    "package": "npx @vscode/vsce package"
+  },
+  "dependencies": {
+    "ignore": "^7.0.5"
   },
   "devDependencies": {
     "@types/node": "^18.19.0",
     "@types/vscode": "^1.85.0",
+    "esbuild": "^0.28.0",
     "typescript": "^5.4.0"
   }
 }

@@ -1,9 +1,11 @@
 import * as vscode from "vscode";
-import { SessionManager } from "./sessionManager";
+import { ClaudeWatcher } from "./claudeWatcher";
+import { AgentDecorationProvider } from "./decorations";
+import { FileState, SessionManager } from "./sessionManager";
 import { SnapshotManager } from "./snapshotManager";
 import { AgentTreeProvider, TreeNode } from "./treeProvider";
 import { AgentSession } from "./types";
-import { getWorkspaceFolder, toAbsolutePath } from "./utils";
+import { getWorkspaceFolder, isProbablyBinary, toAbsolutePath } from "./utils";
 
 /** Virtual scheme used to show an empty side in a diff (created/deleted). */
 const EMPTY_SCHEME = "agentguard-empty";
@@ -12,15 +14,25 @@ export function activate(context: vscode.ExtensionContext): void {
   const snapshots = new SnapshotManager(context);
   const sessions = new SessionManager(context, snapshots);
   const tree = new AgentTreeProvider(sessions);
+  const statusBar = createStatusBar(sessions);
 
   context.subscriptions.push(
     sessions,
+    statusBar,
+    new AgentDecorationProvider(sessions),
+    new ClaudeWatcher(sessions),
     vscode.window.registerTreeDataProvider("agentChangesView", tree),
     // Provides empty content for the "missing" side of created/deleted diffs.
     vscode.workspace.registerTextDocumentContentProvider(EMPTY_SCHEME, {
       provideTextDocumentContent: () => "",
     }),
   );
+
+  // A session may have been active when the window closed; pick up anything
+  // that changed while we were not watching.
+  if (sessions.getActiveSession()) {
+    void sessions.reconcile();
+  }
 
   const register = (
     command: string,
@@ -40,8 +52,20 @@ export function activate(context: vscode.ExtensionContext): void {
     sessions.endSession(asSession(node)?.id),
   );
 
+  register("agentChangeGuard.createCheckpoint", () =>
+    createCheckpoint(sessions),
+  );
+
+  register("agentChangeGuard.restoreCheckpoint", async (node?: unknown) =>
+    restoreCheckpoint(sessions, asCheckpoint(node)),
+  );
+
   register("agentChangeGuard.openDiff", async (node?: unknown) =>
-    openDiff(snapshots, asFileNode(node) ?? (await pickFile(sessions))),
+    openDiff(
+      sessions,
+      snapshots,
+      asFileNode(node) ?? (await pickFile(sessions)),
+    ),
   );
 
   register("agentChangeGuard.revertFile", async (node?: unknown) =>
@@ -55,10 +79,41 @@ export function activate(context: vscode.ExtensionContext): void {
   register("agentChangeGuard.markAccepted", async (node?: unknown) =>
     markAccepted(sessions, asSession(node) ?? (await pickSession(sessions))),
   );
+
+  register("agentChangeGuard.removeSession", async (node?: unknown) =>
+    removeSession(sessions, asSession(node) ?? (await pickSession(sessions))),
+  );
 }
 
 export function deactivate(): void {
   // Subscriptions handle cleanup.
+}
+
+// ---- Status bar ------------------------------------------------------------
+
+function createStatusBar(sessions: SessionManager): vscode.StatusBarItem {
+  const item = vscode.window.createStatusBarItem(
+    vscode.StatusBarAlignment.Left,
+    50,
+  );
+  item.command = "workbench.view.extension.agentChangeGuard";
+  const update = () => {
+    const active = sessions.getActiveSession();
+    if (!active) {
+      item.hide();
+      return;
+    }
+    const count = active.changedFiles.length;
+    const turns = active.checkpoints.length;
+    item.text = `$(shield) ${count} change${count === 1 ? "" : "s"}${
+      turns > 0 ? ` · ${turns} turn${turns === 1 ? "" : "s"}` : ""
+    }`;
+    item.tooltip = `Agent Change Guard — recording "${active.title}". Click to open.`;
+    item.show();
+  };
+  sessions.onDidChange(update);
+  update();
+  return item;
 }
 
 // ---- Command implementations ---------------------------------------------
@@ -69,6 +124,11 @@ async function startSession(sessions: SessionManager): Promise<void> {
       "Agent Change Guard needs an open workspace folder.",
     );
     return;
+  }
+  if ((vscode.workspace.workspaceFolders?.length ?? 0) > 1) {
+    vscode.window.showWarningMessage(
+      "Multi-root workspace detected: only the first folder is tracked.",
+    );
   }
   if (sessions.getActiveSession()) {
     vscode.window.showWarningMessage(
@@ -87,15 +147,88 @@ async function startSession(sessions: SessionManager): Promise<void> {
   await vscode.window.withProgress(
     { location: vscode.ProgressLocation.Notification, title: "Snapshotting workspace…" },
     async () => {
-      const session = await sessions.startSession(title.trim());
-      vscode.window.showInformationMessage(
-        `Started session "${session.title}". Watching for changes.`,
-      );
+      try {
+        const session = await sessions.startSession(title.trim());
+        vscode.window.showInformationMessage(
+          `Started session "${session.title}". Watching for changes.`,
+        );
+      } catch (err) {
+        vscode.window.showErrorMessage(
+          `Could not start session: ${(err as Error).message}`,
+        );
+      }
     },
   );
 }
 
+async function createCheckpoint(sessions: SessionManager): Promise<void> {
+  const session = sessions.getActiveSession();
+  if (!session) {
+    vscode.window.showInformationMessage(
+      "No active session — start one first.",
+    );
+    return;
+  }
+  if (session.pendingFiles.length === 0) {
+    vscode.window.showInformationMessage(
+      "No changes since the last checkpoint.",
+    );
+    return;
+  }
+  const label = await vscode.window.showInputBox({
+    title: "Create Checkpoint",
+    prompt: "Label for the work since the last checkpoint",
+    value: session.currentTurnLabel ?? "",
+    placeHolder: "e.g. Added retry logic to the API client",
+  });
+  if (!label) {
+    return;
+  }
+  const checkpoint = await sessions.createCheckpoint(session, label.trim());
+  if (checkpoint) {
+    vscode.window.showInformationMessage(
+      `Checkpoint "${checkpoint.label}" created (${checkpoint.files.length} files).`,
+    );
+  } else {
+    vscode.window.showInformationMessage(
+      "All pending files matched their previous state — nothing to checkpoint.",
+    );
+  }
+}
+
+async function restoreCheckpoint(
+  sessions: SessionManager,
+  node: Extract<TreeNode, { kind: "checkpoint" }> | undefined,
+): Promise<void> {
+  if (!node) {
+    return;
+  }
+  const confirm = await vscode.window.showWarningMessage(
+    `Restore the workspace to the end of "${node.checkpoint.label}"? ` +
+      `Files changed by later turns are rewound; earlier work is kept.`,
+    { modal: true },
+    "Restore",
+  );
+  if (confirm !== "Restore") {
+    return;
+  }
+  const { restored, skipped } = await sessions.restoreToCheckpoint(
+    node.sessionId,
+    node.index,
+  );
+  if (skipped.length > 0) {
+    vscode.window.showWarningMessage(
+      `Restored ${restored} file${restored === 1 ? "" : "s"}; could not restore: ${skipped.join(", ")}`,
+    );
+  } else {
+    vscode.window.showInformationMessage(
+      `Restored ${restored} file${restored === 1 ? "" : "s"} to "${node.checkpoint.label}".`,
+    );
+  }
+}
+
 async function openDiff(
+  sessions: SessionManager,
   snapshots: SnapshotManager,
   node: Extract<TreeNode, { kind: "file" }> | undefined,
 ): Promise<void> {
@@ -104,24 +237,91 @@ async function openDiff(
   }
   const { sessionId, file } = node;
   const emptyUri = vscode.Uri.parse(`${EMPTY_SCHEME}:empty`);
-  const workspaceUri = vscode.Uri.file(toAbsolutePath(file.path)!);
-  const baselineUri = snapshots.baselineUri(sessionId, file.path);
 
   let left: vscode.Uri;
   let right: vscode.Uri;
-  if (file.status === "created") {
-    left = emptyUri; // no baseline
-    right = workspaceUri;
-  } else if (file.status === "deleted") {
-    left = baselineUri;
-    right = emptyUri; // file no longer exists
+  let title: string;
+
+  if (node.checkpointIndex !== undefined) {
+    // Turn diff: state at previous checkpoint ↔ state at this checkpoint.
+    const session = sessions.getSession(sessionId);
+    if (!session) {
+      return;
+    }
+    if (file.status !== "deleted" && !node.blobHash) {
+      vscode.window.showWarningMessage(
+        `"${file.path}" was too large to store for this checkpoint and cannot be diffed.`,
+      );
+      return;
+    }
+    const pre = sessions.resolveStateAt(
+      session,
+      node.checkpointIndex - 1,
+      file.path,
+    );
+    const preUri = stateUri(snapshots, sessionId, file.path, pre, emptyUri);
+    if (!preUri) {
+      vscode.window.showWarningMessage(
+        `The previous state of "${file.path}" was too large to store and cannot be diffed.`,
+      );
+      return;
+    }
+    left = preUri;
+    right =
+      file.status === "deleted"
+        ? emptyUri
+        : snapshots.blobUri(sessionId, node.blobHash!);
+    title = `${file.path} (turn ${node.checkpointIndex + 1})`;
   } else {
-    left = baselineUri;
-    right = workspaceUri;
+    // Cumulative diff: session baseline ↔ current workspace file.
+    const workspaceUri = vscode.Uri.file(toAbsolutePath(file.path)!);
+    const baselineUri = snapshots.baselineUri(sessionId, file.path);
+    if (file.status === "created") {
+      left = emptyUri; // no baseline
+      right = workspaceUri;
+    } else if (file.status === "deleted") {
+      left = baselineUri;
+      right = emptyUri; // file no longer exists
+    } else {
+      left = baselineUri;
+      right = workspaceUri;
+    }
+    title = `${file.path} (baseline ↔ current)`;
   }
 
-  const title = `${file.path} (baseline ↔ current)`;
+  // Binary content renders as garbage in the text diff; warn first.
+  const checkPath = right.scheme === "file" ? right.fsPath : left.fsPath;
+  if (checkPath && (await isProbablyBinary(checkPath))) {
+    const choice = await vscode.window.showWarningMessage(
+      `"${file.path}" looks like a binary file; the text diff may be unreadable.`,
+      "Open Anyway",
+    );
+    if (choice !== "Open Anyway") {
+      return;
+    }
+  }
+
   await vscode.commands.executeCommand("vscode.diff", left, right, title);
+}
+
+/** URI for a resolved file state, or undefined if it cannot be shown. */
+function stateUri(
+  snapshots: SnapshotManager,
+  sessionId: string,
+  relPath: string,
+  state: FileState,
+  emptyUri: vscode.Uri,
+): vscode.Uri | undefined {
+  switch (state.kind) {
+    case "blob":
+      return snapshots.blobUri(sessionId, state.hash);
+    case "baseline":
+      return snapshots.baselineUri(sessionId, relPath);
+    case "absent":
+      return emptyUri;
+    case "unknown":
+      return undefined;
+  }
 }
 
 async function revertFile(
@@ -129,6 +329,12 @@ async function revertFile(
   node: Extract<TreeNode, { kind: "file" }> | undefined,
 ): Promise<void> {
   if (!node) {
+    return;
+  }
+  if (node.checkpointIndex !== undefined) {
+    vscode.window.showInformationMessage(
+      "Checkpoint entries are history — use \"Restore To Checkpoint\" on the checkpoint, or revert the file from the session's change list.",
+    );
     return;
   }
   const confirm = await vscode.window.showWarningMessage(
@@ -182,6 +388,24 @@ async function markAccepted(
   vscode.window.showInformationMessage(
     `Accepted session "${session.title}". Files kept; snapshot discarded.`,
   );
+}
+
+async function removeSession(
+  sessions: SessionManager,
+  session: AgentSession | undefined,
+): Promise<void> {
+  if (!session) {
+    return;
+  }
+  const confirm = await vscode.window.showWarningMessage(
+    `Remove session "${session.title}"? Its snapshot is deleted and its changes can no longer be reverted. Workspace files are not touched.`,
+    { modal: true },
+    "Remove Session",
+  );
+  if (confirm !== "Remove Session") {
+    return;
+  }
+  await sessions.removeSession(session.id);
 }
 
 // ---- Command-palette pickers ----------------------------------------------
@@ -240,6 +464,19 @@ function asSession(node: unknown): AgentSession | undefined {
     (node as TreeNode).kind === "session"
   ) {
     return (node as Extract<TreeNode, { kind: "session" }>).session;
+  }
+  return undefined;
+}
+
+function asCheckpoint(
+  node: unknown,
+): Extract<TreeNode, { kind: "checkpoint" }> | undefined {
+  if (
+    node &&
+    typeof node === "object" &&
+    (node as TreeNode).kind === "checkpoint"
+  ) {
+    return node as Extract<TreeNode, { kind: "checkpoint" }>;
   }
   return undefined;
 }
