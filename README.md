@@ -1,9 +1,9 @@
 # Agent Change Guard
 
 Track, diff, and revert every file change made during an AI agent session —
-turn by turn. Works with Claude Code out of the box, and with Codex, Cursor
-Agent, or manual work via sessions and manual checkpoints, in VS Code or
-Cursor.
+turn by turn. Works with **Claude Code** and the **OpenAI Codex CLI** out of
+the box, and with Cursor Agent or manual work via sessions and manual
+checkpoints, in VS Code or Cursor.
 
 **It never touches git.** Baselines and checkpoints are plain file copies kept
 in the extension's private storage, so reverting can't wipe your uncommitted
@@ -18,10 +18,12 @@ the agent's own summary.
 
 ## Features
 
-- **Per-turn checkpoints**: with Claude Code, every user message automatically
-  becomes a checkpoint labelled with that message. Expand a turn to see
-  exactly which files it touched and diff each one against its state before
-  the turn.
+- **Per-turn checkpoints**: with Claude Code and Codex, every user message
+  automatically becomes a checkpoint labelled with that message. Expand a turn
+  to see exactly which files it touched and diff each one against its state
+  before the turn.
+- **Auto session start**: the first agent message starts a session for you
+  (configurable), so tracking begins without you remembering to.
 - **Restore to checkpoint**: rewind the workspace to the end of any turn.
   Files changed by later turns are restored; earlier work is kept.
 - **Agent Changes** activity-bar view: sessions → turns → files, with
@@ -36,18 +38,20 @@ the agent's own summary.
 - Respects your `.gitignore` plus a configurable ignore list.
 - Changes made while the window was closed are picked up on reload.
 
-## Usage with Claude Code
+## Usage with Claude Code or Codex
 
 1. Run `Agent Change Guard: Start Session` (or click **＋** in the Agent
-   Changes view) before — or while — Claude Code works.
-2. Chat with Claude Code as usual. Each message you send closes out the
-   previous turn into a checkpoint named after that message.
+   Changes view) before — or while — the agent works. With auto-start on
+   (the default), simply sending the agent a message starts a session.
+2. Chat with the agent as usual. Each message you send closes out the previous
+   turn into a checkpoint named after that message.
 3. Expand a turn in the sidebar to see its files; click one for the
    before ↔ after diff of that turn.
 4. Right-click a turn → **Restore To Checkpoint** to rewind later work.
 
-Set `agentChangeGuard.claudeCode.autoStartSession` to `true` to start a
-session automatically on the first Claude Code message when none is active.
+Turn detection is automatic: Claude Code transcripts are tailed under
+`~/.claude/projects/` and Codex rollout transcripts under `~/.codex/sessions/`.
+Auto-start and auto-checkpoint can each be toggled per agent in settings.
 
 ## Usage with other agents (or by hand)
 
@@ -64,9 +68,11 @@ All commands are in the command palette under `Agent Change Guard: …`.
 | --- | --- | --- |
 | `agentChangeGuard.ignoreDirectories` | `node_modules`, `.git`, `dist`, … | Directory names that are never tracked or snapshotted. |
 | `agentChangeGuard.respectGitignore` | `true` | Also ignore files matched by the workspace root `.gitignore`. |
-| `agentChangeGuard.maxFileSizeMB` | `5` | Files larger than this are not snapshotted and cannot be reverted. |
+| `agentChangeGuard.maxFileSizeMB` | `5` | Files larger than this (in MB) are not snapshotted and cannot be reverted. |
 | `agentChangeGuard.claudeCode.autoCheckpoint` | `true` | Create a checkpoint per Claude Code turn while a session is active. |
-| `agentChangeGuard.claudeCode.autoStartSession` | `false` | Auto-start a session on the first Claude Code message. |
+| `agentChangeGuard.claudeCode.autoStartSession` | `true` | Auto-start a session on the first Claude Code message when none is active. |
+| `agentChangeGuard.codex.autoCheckpoint` | `true` | Create a checkpoint per Codex turn while a session is active. |
+| `agentChangeGuard.codex.autoStartSession` | `true` | Auto-start a session on the first Codex message when none is active. |
 
 ## How it works
 
@@ -75,9 +81,12 @@ is copied into private extension storage as the baseline. While the session is
 active, a file watcher records changes, comparing content hashes so no-op
 saves don't count. At each turn boundary the changed files' contents are
 stored as content-addressed blobs — that's what powers per-turn diffs and
-restore. Claude Code turns are detected by tailing its transcript files under
-`~/.claude/projects/`; nothing is sent anywhere, and your chats are only read
-to extract message boundaries and labels.
+restore.
+
+Agent turns are detected by tailing transcript files: Claude Code under
+`~/.claude/projects/` and the Codex CLI's rollout JSONL under
+`~/.codex/sessions/`. Nothing is sent anywhere; transcripts are only read
+locally to extract message boundaries and labels.
 
 Because reverts and restores only write from these private copies, your git
 state and other uncommitted changes are left untouched. Accepting or removing
@@ -88,8 +97,8 @@ a session deletes its stored data.
 - One session at a time; multi-root workspaces track only the first folder.
 - Renames show as a delete plus a create.
 - Files over the size limit are listed but cannot be diffed or restored.
-- Cursor Agent and Codex turns are not auto-detected yet (use manual
-  checkpoints); Claude Code detection relies on its transcript file format.
+- Cursor Agent turns are not auto-detected yet (use manual checkpoints);
+  auto-detection relies on Claude Code's and Codex's transcript file formats.
 
 ## Development
 
@@ -109,6 +118,7 @@ src/
   sessionManager.ts   // session + checkpoint state, watcher, revert/restore
   snapshotManager.ts  // baseline copies + content-addressed checkpoint blobs
   claudeWatcher.ts    // tails Claude Code transcripts -> turn boundaries
+  codexWatcher.ts     // tails Codex CLI rollout transcripts -> turn boundaries
   treeProvider.ts     // the Agent Changes tree view
   decorations.ts      // Explorer badges for agent-touched files
   types.ts            // shared types
