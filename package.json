@@ -2,9 +2,16 @@
   "name": "agent-change-guard",
   "displayName": "Agent Change Guard",
   "description": "Track, diff, and revert file changes made during an AI agent session (Claude Code, Codex, Cursor Agent) — without touching git.",
-  "version": "0.2.0",
-  "publisher": "agent-change-guard",
+  "version": "0.2.2",
+  "publisher": "PraveenMalagudi",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/praveenMalagudi/extension.git"
+  },
+  "bugs": {
+    "url": "https://github.com/praveenMalagudi/extension/issues"
+  },
   "icon": "media/icon.png",
   "engines": {
     "vscode": "^1.85.0"
@@ -98,8 +105,18 @@
         },
         "agentChangeGuard.claudeCode.autoStartSession": {
           "type": "boolean",
-          "default": false,
+          "default": true,
           "description": "Automatically start a session when Claude Code receives a message and no session is active. Snapshots the workspace, which can take a moment on large projects."
+        },
+        "agentChangeGuard.codex.autoCheckpoint": {
+          "type": "boolean",
+          "default": true,
+          "description": "While a session is active, watch OpenAI Codex CLI transcripts and create a checkpoint for every agent turn (one per user message)."
+        },
+        "agentChangeGuard.codex.autoStartSession": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically start a session when Codex receives a message and no session is active. Snapshots the workspace, which can take a moment on large projects."
         }
       }
     },
@@ -239,6 +256,7 @@
   "devDependencies": {
     "@types/node": "^18.19.0",
     "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^3.9.2",
     "esbuild": "^0.28.0",
     "typescript": "^5.4.0"
   }

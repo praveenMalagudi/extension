@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import { ClaudeWatcher } from "./claudeWatcher";
+import { CodexWatcher } from "./codexWatcher";
 import { AgentDecorationProvider } from "./decorations";
 import { FileState, SessionManager } from "./sessionManager";
 import { SnapshotManager } from "./snapshotManager";
@@ -21,6 +22,7 @@ export function activate(context: vscode.ExtensionContext): void {
     statusBar,
     new AgentDecorationProvider(sessions),
     new ClaudeWatcher(sessions),
+    new CodexWatcher(sessions),
     vscode.window.registerTreeDataProvider("agentChangesView", tree),
     // Provides empty content for the "missing" side of created/deleted diffs.
     vscode.workspace.registerTextDocumentContentProvider(EMPTY_SCHEME, {
