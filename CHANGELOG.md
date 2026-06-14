@@ -2,6 +2,27 @@
 
 All notable changes to the Agent Change Guard extension are documented here.
 
+## [0.2.3] — 2026-06-14
+
+OpenAI Codex CLI support.
+
+### Added
+
+- **Codex CLI integration**: while a session is active, the extension tails
+  the Codex CLI's rollout transcripts (`~/.codex/sessions/`) for the workspace
+  and automatically creates a checkpoint per user message — the same per-turn
+  tracking Claude Code already had. Controlled by
+  `agentChangeGuard.codex.autoCheckpoint` (on by default).
+- Optional auto-start for Codex: `agentChangeGuard.codex.autoStartSession`
+  starts a session on the first Codex message when none is active.
+
+### Changed
+
+- `agentChangeGuard.claudeCode.autoStartSession` now defaults to `true`, so
+  tracking begins on the first agent message without manually starting a
+  session.
+- Rewrote the README to document Codex support and correct the settings table.
+
 ## [0.2.0] — 2026-06-10
 
 Per-turn tracking.
