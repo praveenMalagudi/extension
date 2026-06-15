@@ -2,6 +2,19 @@
 
 All notable changes to the Agent Change Guard extension are documented here.
 
+## Unreleased
+
+### Added
+
+- **Open Original Message** action for Claude Code and Codex turns. The action
+  opens the closest supported platform session/thread link and keeps the exact
+  local transcript line as fallback.
+
+### Changed
+
+- Refined the marketplace icon so the shield mark is centered and no longer
+  shows the extra outer circle/corner artifacts.
+
 ## [0.2.3] — 2026-06-14
 
 OpenAI Codex CLI support.

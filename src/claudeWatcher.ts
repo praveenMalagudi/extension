@@ -4,6 +4,7 @@ import * as os from "os";
 import * as path from "path";
 import * as vscode from "vscode";
 import { SessionManager } from "./sessionManager";
+import { AgentMessageSource } from "./types";
 import { getWorkspaceFolder } from "./utils";
 
 const POLL_MS = 2000;
@@ -26,6 +27,8 @@ export class ClaudeWatcher implements vscode.Disposable {
   private timer: NodeJS.Timeout | undefined;
   /** Bytes already consumed per transcript file. */
   private readonly offsets = new Map<string, number>();
+  /** 1-based line number for the next complete JSONL line per transcript. */
+  private readonly nextLineNumbers = new Map<string, number>();
   /** Partial trailing line per transcript file. */
   private readonly remainders = new Map<string, string>();
   private initialized = false;
@@ -83,8 +86,10 @@ export class ClaudeWatcher implements vscode.Disposable {
     // before the extension loaded is not replayed as new messages.
     if (!this.initialized) {
       for (const name of transcripts) {
-        const size = await this.fileSize(path.join(dir, name));
+        const file = path.join(dir, name);
+        const size = await this.fileSize(file);
         this.offsets.set(name, size);
+        this.nextLineNumbers.set(name, await this.nextLineNumber(file, size));
       }
       this.initialized = true;
       return;
@@ -97,6 +102,8 @@ export class ClaudeWatcher implements vscode.Disposable {
       if (size <= offset) {
         if (size < offset) {
           this.offsets.set(name, size); // truncated/rotated
+          this.nextLineNumbers.set(name, await this.nextLineNumber(file, size));
+          this.remainders.delete(name);
         }
         continue;
       }
@@ -108,26 +115,37 @@ export class ClaudeWatcher implements vscode.Disposable {
       const text = (this.remainders.get(name) ?? "") + chunk;
       const lines = text.split("\n");
       this.remainders.set(name, lines.pop() ?? "");
+      let lineNumber = this.nextLineNumbers.get(name) ?? 1;
       for (const line of lines) {
         const prompt = extractUserPrompt(line);
         if (prompt) {
-          await this.onUserPrompt(prompt);
+          await this.onUserPrompt(prompt, {
+            agent: "claude",
+            transcriptPath: file,
+            sessionId: claudeSessionId(name),
+            lineNumber,
+          });
         }
+        lineNumber++;
       }
+      this.nextLineNumbers.set(name, lineNumber);
     }
   }
 
-  private async onUserPrompt(prompt: string): Promise<void> {
+  private async onUserPrompt(
+    prompt: string,
+    source: AgentMessageSource,
+  ): Promise<void> {
     const label = truncate(prompt, MAX_LABEL_LENGTH);
     const session = this.sessions.getActiveSession();
     if (session) {
-      await this.sessions.beginTurn(session, label);
+      await this.sessions.beginTurn(session, label, source);
       return;
     }
     if (this.config().get<boolean>("autoStartSession", false)) {
       try {
         const started = await this.sessions.startSession(label, "claude");
-        await this.sessions.beginTurn(started, label);
+        await this.sessions.beginTurn(started, label, source);
         vscode.window.showInformationMessage(
           `Agent Change Guard: started session for Claude Code — "${label}"`,
         );
@@ -135,6 +153,14 @@ export class ClaudeWatcher implements vscode.Disposable {
         // A session raced into existence; ignore.
       }
     }
+  }
+
+  private async nextLineNumber(file: string, size: number): Promise<number> {
+    if (size === 0) {
+      return 1;
+    }
+    const text = await this.readRange(file, 0, size);
+    return countNewlines(text ?? "") + 1;
   }
 
   private async fileSize(file: string): Promise<number> {
@@ -169,6 +195,15 @@ export class ClaudeWatcher implements vscode.Disposable {
       this.timer = undefined;
     }
   }
+}
+
+function claudeSessionId(fileName: string): string | undefined {
+  const parsed = path.parse(fileName);
+  return parsed.ext === ".jsonl" && parsed.name ? parsed.name : undefined;
+}
+
+function countNewlines(text: string): number {
+  return (text.match(/\n/g) ?? []).length;
 }
 
 /**

@@ -5,6 +5,7 @@ import * as vscode from "vscode";
 import { SnapshotManager } from "./snapshotManager";
 import {
   AgentChangedFile,
+  AgentMessageSource,
   AgentSession,
   AgentType,
   ChangeStatus,
@@ -227,6 +228,7 @@ export class SessionManager {
   async createCheckpoint(
     session: AgentSession,
     label: string,
+    source: AgentMessageSource | undefined = session.currentTurnSource,
   ): Promise<Checkpoint | undefined> {
     const prevIndex = session.checkpoints.length - 1;
     const maxBytes = getMaxSnapshotBytes();
@@ -274,6 +276,7 @@ export class SessionManager {
     const checkpoint: Checkpoint = {
       id: generateId(),
       label,
+      ...(source ? { source } : {}),
       createdAt: Date.now(),
       files,
     };
@@ -302,14 +305,20 @@ export class SessionManager {
    * *previous* turn: fold them into a checkpoint labelled with that turn's
    * message, then remember the new message as the in-progress turn label.
    */
-  async beginTurn(session: AgentSession, newLabel: string): Promise<void> {
+  async beginTurn(
+    session: AgentSession,
+    newLabel: string,
+    newSource?: AgentMessageSource,
+  ): Promise<void> {
     const previousLabel =
       session.currentTurnLabel ??
       (session.checkpoints.length === 0 ? "Changes before first message" : "Turn");
+    const previousSource = session.currentTurnSource;
     if (session.pendingFiles.length > 0) {
-      await this.createCheckpoint(session, previousLabel);
+      await this.createCheckpoint(session, previousLabel, previousSource);
     }
     session.currentTurnLabel = newLabel;
+    session.currentTurnSource = newSource;
     await this.persist();
   }
 

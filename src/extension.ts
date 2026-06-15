@@ -5,7 +5,7 @@ import { AgentDecorationProvider } from "./decorations";
 import { FileState, SessionManager } from "./sessionManager";
 import { SnapshotManager } from "./snapshotManager";
 import { AgentTreeProvider, TreeNode } from "./treeProvider";
-import { AgentSession } from "./types";
+import { AgentMessageSource, AgentSession } from "./types";
 import { getWorkspaceFolder, isProbablyBinary, toAbsolutePath } from "./utils";
 
 /** Virtual scheme used to show an empty side in a diff (created/deleted). */
@@ -60,6 +60,10 @@ export function activate(context: vscode.ExtensionContext): void {
 
   register("agentChangeGuard.restoreCheckpoint", async (node?: unknown) =>
     restoreCheckpoint(sessions, asCheckpoint(node)),
+  );
+
+  register("agentChangeGuard.openSourceMessage", async (node?: unknown) =>
+    openSourceMessage(sourceFromNode(node)),
   );
 
   register("agentChangeGuard.openDiff", async (node?: unknown) =>
@@ -225,6 +229,68 @@ async function restoreCheckpoint(
   } else {
     vscode.window.showInformationMessage(
       `Restored ${restored} file${restored === 1 ? "" : "s"} to "${node.checkpoint.label}".`,
+    );
+  }
+}
+
+async function openSourceMessage(
+  source: AgentMessageSource | undefined,
+): Promise<void> {
+  if (!source) {
+    vscode.window.showInformationMessage(
+      "No original agent message link is available for this turn.",
+    );
+    return;
+  }
+
+  const externalUri = sourceExternalUri(source);
+  if (externalUri) {
+    try {
+      const opened = await vscode.env.openExternal(
+        vscode.Uri.parse(externalUri),
+      );
+      if (opened) {
+        return;
+      }
+    } catch {
+      // Fall back to the local transcript below.
+    }
+  }
+
+  await openTranscriptLocation(source);
+}
+
+function sourceExternalUri(source: AgentMessageSource): string | undefined {
+  if (!source.sessionId) {
+    return undefined;
+  }
+  const id = encodeURIComponent(source.sessionId);
+  if (source.agent === "codex") {
+    return `codex://threads/${id}`;
+  }
+  return `${vscode.env.uriScheme}://anthropic.claude-code/open?session=${id}`;
+}
+
+async function openTranscriptLocation(
+  source: AgentMessageSource,
+): Promise<void> {
+  try {
+    const document = await vscode.workspace.openTextDocument(
+      vscode.Uri.file(source.transcriptPath),
+    );
+    const editor = await vscode.window.showTextDocument(document, {
+      preview: true,
+    });
+    if (source.lineNumber !== undefined && source.lineNumber > 0) {
+      const line = Math.min(source.lineNumber - 1, document.lineCount - 1);
+      const range = document.lineAt(line).range;
+      editor.selection = new vscode.Selection(range.start, range.end);
+      editor.revealRange(range, vscode.TextEditorRevealType.InCenter);
+    }
+  } catch (err) {
+    const agent = source.agent === "claude" ? "Claude Code" : "Codex";
+    vscode.window.showWarningMessage(
+      `Could not open the ${agent} source message: ${(err as Error).message}`,
     );
   }
 }
@@ -479,6 +545,20 @@ function asCheckpoint(
     (node as TreeNode).kind === "checkpoint"
   ) {
     return node as Extract<TreeNode, { kind: "checkpoint" }>;
+  }
+  return undefined;
+}
+
+function sourceFromNode(node: unknown): AgentMessageSource | undefined {
+  if (!node || typeof node !== "object") {
+    return undefined;
+  }
+  const treeNode = node as TreeNode;
+  if (treeNode.kind === "checkpoint") {
+    return treeNode.checkpoint.source;
+  }
+  if (treeNode.kind === "pendingGroup") {
+    return treeNode.session.currentTurnSource;
   }
   return undefined;
 }

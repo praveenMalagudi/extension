@@ -26,6 +26,9 @@ the agent's own summary.
   (configurable), so tracking begins without you remembering to.
 - **Restore to checkpoint**: rewind the workspace to the end of any turn.
   Files changed by later turns are restored; earlier work is kept.
+- **Open original message**: jump from a turn back to the closest supported
+  Claude Code or Codex session/thread, with the exact local transcript line as
+  fallback.
 - **Agent Changes** activity-bar view: sessions → turns → files, with
   `Created` / `Modified` / `Deleted` badges.
 - Built-in diffs: per-turn (before ↔ after the turn) and cumulative
@@ -47,7 +50,9 @@ the agent's own summary.
    turn into a checkpoint named after that message.
 3. Expand a turn in the sidebar to see its files; click one for the
    before ↔ after diff of that turn.
-4. Right-click a turn → **Restore To Checkpoint** to rewind later work.
+4. Click the external-link action on a turn to reopen the related
+   Claude Code/Codex session or thread when the platform supports it.
+5. Right-click a turn → **Restore To Checkpoint** to rewind later work.
 
 Turn detection is automatic: Claude Code transcripts are tailed under
 `~/.claude/projects/` and Codex rollout transcripts under `~/.codex/sessions/`.
@@ -86,7 +91,8 @@ restore.
 Agent turns are detected by tailing transcript files: Claude Code under
 `~/.claude/projects/` and the Codex CLI's rollout JSONL under
 `~/.codex/sessions/`. Nothing is sent anywhere; transcripts are only read
-locally to extract message boundaries and labels.
+locally to extract message boundaries, labels, and source locations for the
+**Open Original Message** action.
 
 Because reverts and restores only write from these private copies, your git
 state and other uncommitted changes are left untouched. Accepting or removing
@@ -97,6 +103,9 @@ a session deletes its stored data.
 - One session at a time; multi-root workspaces track only the first folder.
 - Renames show as a delete plus a create.
 - Files over the size limit are listed but cannot be diffed or restored.
+- Claude Code and Codex expose session/thread-level links, not documented
+  message-level deep links; **Open Original Message** opens the closest
+  supported platform location and falls back to the local transcript line.
 - Cursor Agent turns are not auto-detected yet (use manual checkpoints);
   auto-detection relies on Claude Code's and Codex's transcript file formats.
 

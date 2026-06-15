@@ -165,10 +165,13 @@ export class AgentTreeProvider implements vscode.TreeDataProvider<TreeNode> {
     item.tooltip = new vscode.MarkdownString(
       `**${checkpoint.label}**\n\n` +
         `${new Date(checkpoint.createdAt).toLocaleString()}\n\n` +
+        sourceTooltip(checkpoint.source) +
         `Right-click to restore the workspace to this point.`,
     );
     item.iconPath = new vscode.ThemeIcon("milestone");
-    item.contextValue = "agentCheckpoint";
+    item.contextValue = checkpoint.source
+      ? "agentCheckpoint.source"
+      : "agentCheckpoint";
     return item;
   }
 
@@ -182,7 +185,9 @@ export class AgentTreeProvider implements vscode.TreeDataProvider<TreeNode> {
     );
     item.description = `in progress · ${count} file${count === 1 ? "" : "s"}`;
     item.iconPath = new vscode.ThemeIcon("loading~spin");
-    item.contextValue = "agentPendingGroup";
+    item.contextValue = session.currentTurnSource
+      ? "agentPendingGroup.source"
+      : "agentPendingGroup";
     return item;
   }
 
@@ -208,4 +213,13 @@ export class AgentTreeProvider implements vscode.TreeDataProvider<TreeNode> {
     };
     return item;
   }
+}
+
+function sourceTooltip(source: Checkpoint["source"]): string {
+  if (!source) {
+    return "";
+  }
+  const label = source.agent === "claude" ? "Claude Code" : "Codex";
+  const session = source.sessionId ? ` session ${source.sessionId}` : "";
+  return `Source: ${label}${session}\n\n`;
 }

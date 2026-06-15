@@ -29,6 +29,17 @@ export interface CheckpointFile {
   blobHash?: string;
 }
 
+/** Location of the agent message that produced a turn, when known. */
+export interface AgentMessageSource {
+  agent: Extract<AgentType, "claude" | "codex">;
+  /** Local transcript JSONL path, used as a reliable fallback target. */
+  transcriptPath: string;
+  /** Claude/Codex session or thread id, when the platform exposes one. */
+  sessionId?: string;
+  /** 1-based line number in the local transcript JSONL file. */
+  lineNumber?: number;
+}
+
 /**
  * A checkpoint marks an agent-turn boundary (one user message → one turn of
  * work). It records every file that changed since the previous checkpoint
@@ -38,6 +49,8 @@ export interface Checkpoint {
   id: string;
   /** Usually the user message that started the turn. */
   label: string;
+  /** Original agent message location, if the watcher could identify it. */
+  source?: AgentMessageSource;
   createdAt: number;
   files: CheckpointFile[];
 }
@@ -56,5 +69,7 @@ export interface AgentSession {
   pendingFiles: AgentChangedFile[];
   /** Label for the in-progress turn (the latest user message). */
   currentTurnLabel?: string;
+  /** Source for the in-progress turn's latest user message. */
+  currentTurnSource?: AgentMessageSource;
   status: SessionStatus;
 }

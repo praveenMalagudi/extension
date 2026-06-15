@@ -3,6 +3,7 @@ import * as os from "os";
 import * as path from "path";
 import * as vscode from "vscode";
 import { SessionManager } from "./sessionManager";
+import { AgentMessageSource } from "./types";
 import { getWorkspaceFolder } from "./utils";
 
 const POLL_MS = 2000;
@@ -27,10 +28,14 @@ export class CodexWatcher implements vscode.Disposable {
   private timer: NodeJS.Timeout | undefined;
   /** Bytes already consumed per transcript file (keyed by absolute path). */
   private readonly offsets = new Map<string, number>();
+  /** 1-based line number for the next complete JSONL line per transcript. */
+  private readonly nextLineNumbers = new Map<string, number>();
   /** Partial trailing line per transcript file. */
   private readonly remainders = new Map<string, string>();
   /** Cached "does this file belong to our workspace?" decision per path. */
   private readonly ownership = new Map<string, boolean>();
+  /** Cached Codex session/thread id per rollout transcript. */
+  private readonly sessionIds = new Map<string, string>();
   private initialized = false;
   private busy = false;
 
@@ -106,7 +111,9 @@ export class CodexWatcher implements vscode.Disposable {
     // before the extension loaded is not replayed as new messages.
     if (!this.initialized) {
       for (const file of files) {
-        this.offsets.set(file, await this.fileSize(file));
+        const size = await this.fileSize(file);
+        this.offsets.set(file, size);
+        this.nextLineNumbers.set(file, await this.nextLineNumber(file, size));
       }
       this.initialized = true;
       return;
@@ -122,6 +129,8 @@ export class CodexWatcher implements vscode.Disposable {
       if (size <= offset) {
         if (size < offset) {
           this.offsets.set(file, size); // truncated/rotated
+          this.nextLineNumbers.set(file, await this.nextLineNumber(file, size));
+          this.remainders.delete(file);
         }
         continue;
       }
@@ -133,12 +142,20 @@ export class CodexWatcher implements vscode.Disposable {
       const text = (this.remainders.get(file) ?? "") + chunk;
       const lines = text.split("\n");
       this.remainders.set(file, lines.pop() ?? "");
+      let lineNumber = this.nextLineNumbers.get(file) ?? 1;
       for (const line of lines) {
         const prompt = extractUserPrompt(line);
         if (prompt) {
-          await this.onUserPrompt(prompt);
+          await this.onUserPrompt(prompt, {
+            agent: "codex",
+            transcriptPath: file,
+            sessionId: this.sessionIds.get(file) ?? codexSessionId(file),
+            lineNumber,
+          });
         }
+        lineNumber++;
       }
+      this.nextLineNumbers.set(file, lineNumber);
     }
   }
 
@@ -154,43 +171,64 @@ export class CodexWatcher implements vscode.Disposable {
     if (cached !== undefined) {
       return cached;
     }
-    const cwd = await this.readSessionCwd(file);
+    const info = await this.readSessionInfo(file);
     // If the header is unreadable yet (file just created, partial write),
     // don't cache — retry on the next poll.
-    if (cwd === undefined) {
+    if (info.cwd === undefined) {
       return false;
     }
-    const owned = normalizePath(cwd) === wsPath;
+    if (info.sessionId) {
+      this.sessionIds.set(file, info.sessionId);
+    }
+    const owned = normalizePath(info.cwd) === wsPath;
     this.ownership.set(file, owned);
     return owned;
   }
 
-  private async readSessionCwd(file: string): Promise<string | undefined> {
+  private async readSessionInfo(
+    file: string,
+  ): Promise<{ cwd?: string; sessionId?: string }> {
     const head = await this.readRange(file, 0, 65536);
     if (!head) {
-      return undefined;
+      return {};
     }
     const firstLine = head.split("\n", 1)[0];
     if (!firstLine) {
-      return undefined;
+      return {};
     }
     try {
       const entry = JSON.parse(firstLine);
       if (entry?.type === "session_meta") {
         const cwd = entry.payload?.cwd;
-        return typeof cwd === "string" ? cwd : undefined;
+        const sessionId =
+          stringValue(
+            entry.payload?.id,
+            entry.payload?.session_id,
+            entry.payload?.sessionId,
+            entry.payload?.conversation_id,
+            entry.payload?.conversationId,
+            entry.payload?.thread_id,
+            entry.payload?.threadId,
+          ) ?? codexSessionId(file);
+        return {
+          cwd: typeof cwd === "string" ? cwd : undefined,
+          sessionId,
+        };
       }
     } catch {
       // Header not yet fully written.
     }
-    return undefined;
+    return { sessionId: codexSessionId(file) };
   }
 
-  private async onUserPrompt(prompt: string): Promise<void> {
+  private async onUserPrompt(
+    prompt: string,
+    source: AgentMessageSource,
+  ): Promise<void> {
     const label = truncate(prompt, MAX_LABEL_LENGTH);
     const session = this.sessions.getActiveSession();
     if (session) {
-      await this.sessions.beginTurn(session, label);
+      await this.sessions.beginTurn(session, label, source);
       return;
     }
     if (this.config().get<boolean>("autoStartSession", true)) {
@@ -202,7 +240,7 @@ export class CodexWatcher implements vscode.Disposable {
         async () => {
           try {
             const started = await this.sessions.startSession(label, "codex");
-            await this.sessions.beginTurn(started, label);
+            await this.sessions.beginTurn(started, label, source);
             vscode.window.showInformationMessage(
               `Agent Change Guard: tracking Codex session — "${label}"`,
             );
@@ -212,6 +250,14 @@ export class CodexWatcher implements vscode.Disposable {
         },
       );
     }
+  }
+
+  private async nextLineNumber(file: string, size: number): Promise<number> {
+    if (size === 0) {
+      return 1;
+    }
+    const text = await this.readRange(file, 0, size);
+    return countNewlines(text ?? "") + 1;
   }
 
   private async fileSize(file: string): Promise<number> {
@@ -284,6 +330,26 @@ export function extractUserPrompt(line: string): string | undefined {
 function normalizePath(p: string): string {
   // macOS/Windows paths are case-insensitive; drop any trailing separator.
   return p.replace(/[\\/]+$/, "").toLowerCase();
+}
+
+function codexSessionId(file: string): string | undefined {
+  const match = path
+    .basename(file)
+    .match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/i);
+  return match?.[1];
+}
+
+function stringValue(...values: unknown[]): string | undefined {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim()) {
+      return value;
+    }
+  }
+  return undefined;
+}
+
+function countNewlines(text: string): number {
+  return (text.match(/\n/g) ?? []).length;
 }
 
 function truncate(text: string, max: number): string {
