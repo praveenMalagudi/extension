@@ -5,10 +5,9 @@ import * as path from "path";
 import * as vscode from "vscode";
 import { SessionManager } from "./sessionManager";
 import { AgentMessageSource } from "./types";
-import { getWorkspaceFolder } from "./utils";
+import { getWorkspaceFolder, promptLabel } from "./utils";
 
 const POLL_MS = 2000;
-const MAX_LABEL_LENGTH = 80;
 
 /**
  * Watches Claude Code's transcript files for this workspace and turns every
@@ -77,8 +76,14 @@ export class ClaudeWatcher implements vscode.Disposable {
     let entries: string[];
     try {
       entries = await fsp.readdir(dir);
-    } catch {
-      return; // Claude Code never used in this workspace.
+    } catch (err) {
+      // Claude Code not used in this workspace yet. There is no history to
+      // skip, so the first transcript it creates is read from the start —
+      // otherwise the first message of the first conversation would be lost.
+      if ((err as NodeJS.ErrnoException)?.code === "ENOENT") {
+        this.initialized = true;
+      }
+      return;
     }
     const transcripts = entries.filter((e) => e.endsWith(".jsonl"));
 
@@ -136,7 +141,7 @@ export class ClaudeWatcher implements vscode.Disposable {
     prompt: string,
     source: AgentMessageSource,
   ): Promise<void> {
-    const label = truncate(prompt, MAX_LABEL_LENGTH);
+    const label = promptLabel(prompt);
     const session = this.sessions.getActiveSession();
     if (session) {
       await this.sessions.beginTurn(session, label, source);
@@ -251,9 +256,4 @@ export function extractUserPrompt(line: string): string | undefined {
     return undefined;
   }
   return text;
-}
-
-function truncate(text: string, max: number): string {
-  const oneLine = text.replace(/\s+/g, " ").trim();
-  return oneLine.length <= max ? oneLine : `${oneLine.slice(0, max - 1)}…`;
 }

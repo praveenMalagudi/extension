@@ -2,7 +2,55 @@
 
 All notable changes to the Agent Change Guard extension are documented here.
 
-## Unreleased
+## [0.2.6] — 2026-11-17
+
+![Turn Flow: open a turn from the sidebar, replay it, and open that turn's diff](docs/images/turn-flow-demo.gif)
+
+**How to use Turn Flow:** open **Agent Changes** in the activity bar, hover a
+turn and click its flow icon, then press **Replay**. Click a changed file to
+see what that turn changed, and use **‹ ›** to move between turns.
+[Full-quality video (MP4)](docs/images/turn-flow-demo.mp4) ·
+[Screenshot](docs/images/turn-flow.png)
+
+### Added
+
+- **Turn Flow** (`Agent Change Guard: Show Turn Flow`): a flowchart of one
+  agent turn, from the user message through every step the agent took (reads,
+  searches, edits, commands, subagents and their steps, web calls) to the files
+  that changed, with an animated replay, live updates for the turn in progress,
+  click-through to diffs, and navigation between turns. Opened from the flow
+  icon on a turn, the current turn, or a session's context menu.
+- **Agent steps** in the sidebar: each Claude Code or Codex turn lists the
+  steps the agent took; clicking one opens the turn diff of the file it wrote
+  or the file it read.
+- **Unattributed change warnings**: files a finished turn changed that no
+  recorded agent step wrote (for example a shell command, formatter, or build
+  step) are marked "no agent edit" in the sidebar and called out in Turn Flow.
+  Claude Code's own record of files a Bash command edited counts as a write.
+  So does Codex's own record of the files each patch changed.
+
+### Fixed
+
+- **Codex turns were not detected** with current Codex versions, which record
+  user messages in a newer format (and rewrite older rollouts into it). Both
+  formats are now recognised, so Codex turns become checkpoints again.
+- Codex's own subagents (such as the approval reviewer) no longer start new
+  turns: their rollouts share the workspace folder but are skipped.
+- Turns recorded before Codex rewrote a rollout are found again: when a
+  turn's message has moved to another line, it is located by its text.
+- **The first Claude Code message in a new project was missed.** In a folder
+  where Claude Code had never been used, that first turn (and its changes)
+  was skipped as if it were old history. It now starts a turn like any other.
+
+## [0.2.5] — 2026-06-16
+
+### Changed
+
+- Improved Marketplace/Open VSX search metadata so the extension is easier to
+  find for agent, AI agent, Claude Code, Codex, Cursor Agent, diff, and revert
+  searches.
+
+## [0.2.4] — 2026-06-15
 
 ### Added
 

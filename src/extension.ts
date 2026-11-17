@@ -5,6 +5,8 @@ import { AgentDecorationProvider } from "./decorations";
 import { FileState, SessionManager } from "./sessionManager";
 import { SnapshotManager } from "./snapshotManager";
 import { AgentTreeProvider, TreeNode } from "./treeProvider";
+import { TurnFlowActions, TurnFlowPanel, TurnRef } from "./turnFlowPanel";
+import { TurnTraces } from "./turnTrace";
 import { AgentMessageSource, AgentSession } from "./types";
 import { getWorkspaceFolder, isProbablyBinary, toAbsolutePath } from "./utils";
 
@@ -14,8 +16,13 @@ const EMPTY_SCHEME = "agentguard-empty";
 export function activate(context: vscode.ExtensionContext): void {
   const snapshots = new SnapshotManager(context);
   const sessions = new SessionManager(context, snapshots);
-  const tree = new AgentTreeProvider(sessions);
+  const traces = new TurnTraces();
+  const tree = new AgentTreeProvider(sessions, traces);
   const statusBar = createStatusBar(sessions);
+  const flowActions: TurnFlowActions = {
+    openDiff: (node, column) => openDiff(sessions, snapshots, node, column),
+    openSource: (source) => openSourceMessage(source),
+  };
 
   context.subscriptions.push(
     sessions,
@@ -65,6 +72,13 @@ export function activate(context: vscode.ExtensionContext): void {
   register("agentChangeGuard.openSourceMessage", async (node?: unknown) =>
     openSourceMessage(sourceFromNode(node)),
   );
+
+  register("agentChangeGuard.showTurnFlow", async (node?: unknown) => {
+    const ref = turnRefFromNode(node) ?? (await pickTurn(sessions));
+    if (ref) {
+      TurnFlowPanel.show(context.extensionUri, sessions, traces, flowActions, ref);
+    }
+  });
 
   register("agentChangeGuard.openDiff", async (node?: unknown) =>
     openDiff(
@@ -299,6 +313,7 @@ async function openDiff(
   sessions: SessionManager,
   snapshots: SnapshotManager,
   node: Extract<TreeNode, { kind: "file" }> | undefined,
+  column?: vscode.ViewColumn,
 ): Promise<void> {
   if (!node) {
     return;
@@ -369,7 +384,13 @@ async function openDiff(
     }
   }
 
-  await vscode.commands.executeCommand("vscode.diff", left, right, title);
+  await vscode.commands.executeCommand(
+    "vscode.diff",
+    left,
+    right,
+    title,
+    column === undefined ? undefined : { viewColumn: column, preview: true },
+  );
 }
 
 /** URI for a resolved file state, or undefined if it cannot be shown. */
@@ -521,6 +542,37 @@ async function pickFile(
     : undefined;
 }
 
+async function pickTurn(sessions: SessionManager): Promise<TurnRef | undefined> {
+  const session = await pickSession(sessions);
+  if (!session) {
+    return undefined;
+  }
+  const items: (vscode.QuickPickItem & { ref: TurnRef })[] =
+    session.checkpoints.map((checkpoint, index) => ({
+      label: `${index + 1}. ${checkpoint.label}`,
+      description: `${checkpoint.files.length} file${checkpoint.files.length === 1 ? "" : "s"}`,
+      ref: { sessionId: session.id, checkpointId: checkpoint.id },
+    }));
+  if (session.status === "active" || session.pendingFiles.length > 0) {
+    items.push({
+      label: session.currentTurnLabel ?? "Current turn",
+      description: "in progress",
+      ref: { sessionId: session.id },
+    });
+  }
+  if (items.length === 0) {
+    vscode.window.showInformationMessage("This session has no turns yet.");
+    return undefined;
+  }
+  if (items.length === 1) {
+    return items[0].ref;
+  }
+  const picked = await vscode.window.showQuickPick(items.reverse(), {
+    title: `Turns in "${session.title}"`,
+  });
+  return picked?.ref;
+}
+
 // ---- Argument coercion ----------------------------------------------------
 // Commands may be invoked from a tree node (right-click) or the command
 // palette (no argument). These helpers normalise the incoming value.
@@ -561,6 +613,35 @@ function sourceFromNode(node: unknown): AgentMessageSource | undefined {
     return treeNode.session.currentTurnSource;
   }
   return undefined;
+}
+
+/** The turn a tree node belongs to; a session maps to its latest turn. */
+function turnRefFromNode(node: unknown): TurnRef | undefined {
+  if (!node || typeof node !== "object") {
+    return undefined;
+  }
+  const treeNode = node as TreeNode;
+  switch (treeNode.kind) {
+    case "checkpoint":
+      return {
+        sessionId: treeNode.sessionId,
+        checkpointId: treeNode.checkpoint.id,
+      };
+    case "pendingGroup":
+      return { sessionId: treeNode.session.id };
+    case "session": {
+      const { session } = treeNode;
+      const latest = session.checkpoints[session.checkpoints.length - 1];
+      const pending =
+        session.status === "active" || session.pendingFiles.length > 0;
+      return {
+        sessionId: session.id,
+        checkpointId: pending ? undefined : latest?.id,
+      };
+    }
+    default:
+      return undefined;
+  }
 }
 
 function asFileNode(

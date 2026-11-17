@@ -66,6 +66,20 @@ export function toRelativePath(absPath: string): string | undefined {
   return rel.split(path.sep).join("/");
 }
 
+const MAX_LABEL_LENGTH = 80;
+
+/**
+ * A turn's label: its user message on one line, cut to 80 characters. The
+ * transcript watchers label turns with it, and Turn Flow relies on getting
+ * the same label from the same message to find a message whose line moved.
+ */
+export function promptLabel(prompt: string): string {
+  const oneLine = prompt.replace(/\s+/g, " ").trim();
+  return oneLine.length <= MAX_LABEL_LENGTH
+    ? oneLine
+    : `${oneLine.slice(0, MAX_LABEL_LENGTH - 1)}…`;
+}
+
 /** Resolve a workspace-relative path back to an absolute fs path. */
 export function toAbsolutePath(relPath: string): string | undefined {
   const folder = getWorkspaceFolder();

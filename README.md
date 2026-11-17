@@ -29,6 +29,14 @@ the agent's own summary.
 - **Open original message**: jump from a turn back to the closest supported
   Claude Code or Codex session/thread, with the exact local transcript line as
   fallback.
+- **Turn Flow**: see *how* a turn happened, not just what changed. A
+  flowchart of every step the agent took — files it read, searches, edits,
+  commands (with failures), subagents and their own steps — ending in the files
+  that changed, with an animated replay. Each turn also gets an **Agent steps**
+  list in the sidebar.
+- **Unattributed change warnings**: files a turn changed that no agent edit
+  wrote (a shell command, formatter, build step, another tool, or you) are
+  flagged in the sidebar and in Turn Flow.
 - **Agent Changes** activity-bar view: sessions → turns → files, with
   `Created` / `Modified` / `Deleted` badges.
 - Built-in diffs: per-turn (before ↔ after the turn) and cumulative
@@ -53,6 +61,53 @@ the agent's own summary.
 4. Click the external-link action on a turn to reopen the related
    Claude Code/Codex session or thread when the platform supports it.
 5. Right-click a turn → **Restore To Checkpoint** to rewind later work.
+6. Click the flow icon on a turn (or the current turn) to open **Turn Flow**.
+
+## Turn Flow
+
+![Opening Turn Flow from a turn in the sidebar, replaying it, and opening that turn's diff](docs/images/turn-flow-demo.gif)
+
+[Watch the demo in full quality (MP4)](docs/images/turn-flow-demo.mp4)
+
+Turn Flow reconstructs a turn from the agent's own transcript: the user
+message, then each step in order, then the files that changed.
+
+### How to use it
+
+1. Open **Agent Changes** in the activity bar. Each turn lists the files it
+   changed and, under **Agent steps**, what the agent did.
+2. Hover a turn and click its **flow icon** to open Turn Flow. You can also
+   right-click a turn or a session → **Show Turn Flow**, or run
+   `Agent Change Guard: Show Turn Flow` from the Command Palette.
+3. Press **Replay** to play the turn back step by step.
+4. Click a changed file to see what that turn changed.
+5. Use **‹ ›** at the top to move between turns.
+
+![Turn Flow for one Claude Code turn: the message, every step the agent took, and the files it read and changed](docs/images/turn-flow.png)
+
+- **Replay** plays the turn back step by step, paced by the real time between
+  steps (0.5×–4×). Files light up in the side panel as the agent touches them.
+  Use the scrubber or ←/→ to move through it, Space to play or pause.
+
+  ![A replay half way through: the steps so far are shown and the files they touched are lit](docs/images/turn-flow-replay.png)
+
+- Click a changed file (or the step that wrote it) for that turn's diff; click
+  a read file to open it. Hover a file to highlight the steps that touched it.
+- ‹ › moves between turns. The current turn updates live while the agent
+  works, and keeps showing once it becomes a checkpoint.
+- Files changed in a turn with no matching agent edit are called out at the
+  top. They are checked only for finished turns with a readable transcript.
+
+In the sidebar, each turn lists its **Agent steps**; click one to open the
+file it wrote (as that turn's diff) or read. A file the turn changed without
+a matching agent edit is marked **no agent edit**.
+
+<img src="docs/images/agent-steps.png" width="450" alt="The Agent Changes sidebar: a turn's changed files, a 'no agent edit' warning on package.json, and the turn's agent steps">
+
+Turn Flow needs the turn's transcript, so it shows steps for Claude Code and
+Codex turns only; manual checkpoints show their changed files. Nothing is
+stored: steps are read from the transcript on demand, so a deleted transcript
+means a files-only view.
 
 Turn detection is automatic: Claude Code transcripts are tailed under
 `~/.claude/projects/` and Codex rollout transcripts under `~/.codex/sessions/`.

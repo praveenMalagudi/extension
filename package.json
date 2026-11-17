@@ -1,8 +1,8 @@
 {
   "name": "agent-change-guard",
   "displayName": "Agent Change Guard",
-  "description": "Track, diff, and revert file changes made during an AI agent session (Claude Code, Codex, Cursor Agent) — without touching git.",
-  "version": "0.2.3",
+  "description": "Agent change tracker for Claude Code, Codex, and Cursor: track, diff, checkpoint, and revert AI agent file changes without touching git.",
+  "version": "0.2.6",
   "publisher": "PraveenMalagudi",
   "license": "MIT",
   "repository": {
@@ -21,9 +21,17 @@
     "SCM Providers"
   ],
   "keywords": [
-    "ai",
     "agent",
+    "ai-agent",
+    "ai",
+    "agent changes",
+    "agent diff",
+    "agent revert",
+    "ai change tracker",
+    "claude code",
     "claude",
+    "codex",
+    "cursor agent",
     "cursor",
     "copilot",
     "diff",
@@ -146,6 +154,11 @@
         "icon": "$(link-external)"
       },
       {
+        "command": "agentChangeGuard.showTurnFlow",
+        "title": "Agent Change Guard: Show Turn Flow",
+        "icon": "$(workflow)"
+      },
+      {
         "command": "agentChangeGuard.openDiff",
         "title": "Agent Change Guard: Open Diff",
         "icon": "$(diff)"
@@ -194,6 +207,31 @@
         }
       ],
       "view/item/context": [
+        {
+          "command": "agentChangeGuard.showTurnFlow",
+          "when": "view == agentChangesView && viewItem =~ /^agentSession/",
+          "group": "1_session@0"
+        },
+        {
+          "command": "agentChangeGuard.showTurnFlow",
+          "when": "view == agentChangesView && viewItem =~ /^agentCheckpoint(\\.source)?$/",
+          "group": "inline@0"
+        },
+        {
+          "command": "agentChangeGuard.showTurnFlow",
+          "when": "view == agentChangesView && viewItem =~ /^agentPendingGroup/",
+          "group": "inline@0"
+        },
+        {
+          "command": "agentChangeGuard.showTurnFlow",
+          "when": "view == agentChangesView && viewItem =~ /^agentCheckpoint(\\.source)?$/",
+          "group": "1_checkpoint@0"
+        },
+        {
+          "command": "agentChangeGuard.showTurnFlow",
+          "when": "view == agentChangesView && viewItem =~ /^agentPendingGroup/",
+          "group": "1_checkpoint@0"
+        },
         {
           "command": "agentChangeGuard.endSession",
           "when": "view == agentChangesView && viewItem == agentSession.active",

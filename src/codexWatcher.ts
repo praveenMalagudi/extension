@@ -4,10 +4,9 @@ import * as path from "path";
 import * as vscode from "vscode";
 import { SessionManager } from "./sessionManager";
 import { AgentMessageSource } from "./types";
-import { getWorkspaceFolder } from "./utils";
+import { getWorkspaceFolder, promptLabel } from "./utils";
 
 const POLL_MS = 2000;
-const MAX_LABEL_LENGTH = 80;
 
 /**
  * Watches the OpenAI Codex CLI's rollout transcripts for this workspace and
@@ -18,11 +17,13 @@ const MAX_LABEL_LENGTH = 80;
  * `~/.codex/sessions/<YYYY>/<MM>/<DD>/rollout-<ts>-<uuid>.jsonl`. The first
  * line of each file is a `session_meta` entry whose `payload.cwd` records the
  * workspace, so we classify each file once and only tail the ones that belong
- * to this workspace.
+ * to this workspace. Rollouts of Codex's own subagents (such as the approval
+ * reviewer) share the workspace `cwd` but are not the user's conversation, so
+ * they are skipped.
  *
- * Genuine user prompts arrive as `event_msg` entries of type `user_message`
- * with the raw text in `payload.message` — this skips the `<environment_context>`
- * and developer/tool preamble that the lower-level `response_item` stream mixes in.
+ * Genuine user prompts are read from `event_msg` entries (see
+ * `extractUserPrompt`) — this skips the `<environment_context>` and
+ * developer/tool preamble that the lower-level `response_item` stream mixes in.
  */
 export class CodexWatcher implements vscode.Disposable {
   private timer: NodeJS.Timeout | undefined;
@@ -180,14 +181,14 @@ export class CodexWatcher implements vscode.Disposable {
     if (info.sessionId) {
       this.sessionIds.set(file, info.sessionId);
     }
-    const owned = normalizePath(info.cwd) === wsPath;
+    const owned = !info.subagent && normalizePath(info.cwd) === wsPath;
     this.ownership.set(file, owned);
     return owned;
   }
 
   private async readSessionInfo(
     file: string,
-  ): Promise<{ cwd?: string; sessionId?: string }> {
+  ): Promise<{ cwd?: string; sessionId?: string; subagent?: boolean }> {
     const head = await this.readRange(file, 0, 65536);
     if (!head) {
       return {};
@@ -210,9 +211,16 @@ export class CodexWatcher implements vscode.Disposable {
             entry.payload?.thread_id,
             entry.payload?.threadId,
           ) ?? codexSessionId(file);
+        // A subagent's rollout names its parent thread and/or says so in
+        // `source` (e.g. {"subagent": {"other": "guardian"}}).
+        const source = entry.payload?.source;
+        const subagent =
+          typeof entry.payload?.parent_thread_id === "string" ||
+          (typeof source === "object" && source !== null && "subagent" in source);
         return {
           cwd: typeof cwd === "string" ? cwd : undefined,
           sessionId,
+          subagent,
         };
       }
     } catch {
@@ -225,7 +233,7 @@ export class CodexWatcher implements vscode.Disposable {
     prompt: string,
     source: AgentMessageSource,
   ): Promise<void> {
-    const label = truncate(prompt, MAX_LABEL_LENGTH);
+    const label = promptLabel(prompt);
     const session = this.sessions.getActiveSession();
     if (session) {
       await this.sessions.beginTurn(session, label, source);
@@ -296,18 +304,23 @@ export class CodexWatcher implements vscode.Disposable {
 
 /**
  * Extract the text of a genuine user prompt from one Codex rollout JSONL line.
- * Codex surfaces real prompts as `event_msg` entries of type `user_message`;
- * everything else (assistant output, tool calls, environment context,
+ * Codex has recorded prompts in two shapes, both `event_msg` entries:
+ *
+ * - `payload.type == "user_message"`, text in `payload.message` (older CLIs);
+ * - `payload.type == "item_completed"` with `payload.item.type ==
+ *   "UserMessage"`, text in `payload.item.content[].text` (current CLIs, and
+ *   older rollouts Codex has since rewritten).
+ *
+ * Everything else (assistant output, tool calls, environment context,
  * developer preamble) is ignored.
  */
 export function extractUserPrompt(line: string): string | undefined {
-  const trimmed = line.trim();
-  if (!trimmed) {
-    return undefined;
+  if (!mightBeUserPrompt(line)) {
+    return undefined; // Skip the JSON parse for tool calls and output.
   }
   let entry: any;
   try {
-    entry = JSON.parse(trimmed);
+    entry = JSON.parse(line.trim());
   } catch {
     return undefined;
   }
@@ -315,16 +328,30 @@ export function extractUserPrompt(line: string): string | undefined {
     return undefined;
   }
   const payload = entry.payload;
-  if (!payload || payload.type !== "user_message") {
-    return undefined;
+  let text: string | undefined;
+  if (payload?.type === "user_message") {
+    text = typeof payload.message === "string" ? payload.message : undefined;
+  } else if (
+    payload?.type === "item_completed" &&
+    payload.item?.type === "UserMessage" &&
+    Array.isArray(payload.item.content)
+  ) {
+    text = payload.item.content
+      .filter((c: any) => c?.type === "text" && typeof c.text === "string")
+      .map((c: any) => c.text)
+      .join("\n");
   }
-  const text =
-    typeof payload.message === "string" ? payload.message.trim() : undefined;
+  text = text?.trim();
   // Empty messages and harness bookkeeping (tag markup) are not prompts.
   if (!text || text.startsWith("<")) {
     return undefined;
   }
   return text;
+}
+
+/** Cheap substring test: false means the line is certainly not a prompt. */
+export function mightBeUserPrompt(line: string): boolean {
+  return line.includes('"user_message"') || line.includes('"UserMessage"');
 }
 
 function normalizePath(p: string): string {
@@ -350,9 +377,4 @@ function stringValue(...values: unknown[]): string | undefined {
 
 function countNewlines(text: string): number {
   return (text.match(/\n/g) ?? []).length;
-}
-
-function truncate(text: string, max: number): string {
-  const oneLine = text.replace(/\s+/g, " ").trim();
-  return oneLine.length <= max ? oneLine : `${oneLine.slice(0, max - 1)}…`;
 }

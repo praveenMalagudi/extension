@@ -8,4 +8,5 @@ node_modules/**
 out/**
 *.vsix
 media/icon-source.svg
+docs/**
 !out/extension.js

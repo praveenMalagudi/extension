@@ -1,0 +1,832 @@
+/* Turn Flow webview. Colors come from the VS Code theme so the panel follows
+   light, dark and high-contrast themes. */
+
+:root {
+  --fg: var(--vscode-foreground);
+  --muted: var(--vscode-descriptionForeground);
+  --bg: var(--vscode-editor-background);
+  --card: var(--vscode-editorWidget-background, var(--vscode-editor-background));
+  --border: var(--vscode-widget-border, var(--vscode-panel-border, rgba(128, 128, 128, 0.35)));
+  --line: var(--vscode-panel-border, rgba(128, 128, 128, 0.45));
+  --accent: var(--vscode-focusBorder, #0078d4);
+  --link: var(--vscode-textLink-foreground, #3794ff);
+  --error: var(--vscode-errorForeground, #f14c4c);
+  --warn: var(--vscode-editorWarning-foreground, #cca700);
+  --added: var(--vscode-gitDecoration-addedResourceForeground, #81b88b);
+  --modified: var(--vscode-gitDecoration-modifiedResourceForeground, #e2c08d);
+  --deleted: var(--vscode-gitDecoration-deletedResourceForeground, #c74e39);
+
+  --c-read: var(--vscode-charts-blue, #3794ff);
+  --c-search: var(--vscode-charts-blue, #3794ff);
+  --c-explore: var(--vscode-charts-blue, #3794ff);
+  --c-edit: var(--vscode-charts-orange, #d18616);
+  --c-write: var(--vscode-charts-green, #89d185);
+  --c-delete: var(--vscode-charts-red, #f14c4c);
+  --c-command: var(--vscode-charts-yellow, #cca700);
+  --c-agent: var(--vscode-charts-purple, #b180d7);
+  --c-web: var(--vscode-textLink-foreground, #3794ff);
+  --c-message: var(--vscode-descriptionForeground, #9d9d9d);
+  --c-other: var(--vscode-descriptionForeground, #9d9d9d);
+  --c-prompt: var(--vscode-textLink-foreground, #3794ff);
+  --c-result: var(--vscode-charts-green, #89d185);
+  --c-running: var(--vscode-progressBar-background, #0e70c0);
+
+  --gutter: 22px; /* x of the connector line, center of each badge */
+}
+
+* {
+  box-sizing: border-box;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  color: var(--fg);
+  background: var(--bg);
+  font-family: var(--vscode-font-family);
+  font-size: var(--vscode-font-size);
+  line-height: 1.45;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+}
+
+.app {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 16px 20px 40px;
+}
+
+.empty,
+.muted {
+  color: var(--muted);
+}
+
+.icon {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* ---- Header ---------------------------------------------------------------- */
+
+.head {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.head-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+}
+
+.nav {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.position {
+  font-weight: 600;
+  min-width: 8ch;
+  text-align: center;
+}
+
+.badges {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.agent,
+.live {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-size: 0.85em;
+  background: var(--vscode-badge-background);
+  color: var(--vscode-badge-foreground);
+}
+
+.live {
+  background: transparent;
+  color: var(--c-running);
+  border: 1px solid currentColor;
+}
+
+.live-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: blink 1.4s ease-in-out infinite;
+}
+
+.session {
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 40ch;
+}
+
+.prompt {
+  margin: 4px 0 0;
+  font-size: 1.15em;
+  font-weight: 600;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.prompt.clamp {
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.stats {
+  color: var(--muted);
+}
+
+.head-actions {
+  display: flex;
+  gap: 12px;
+}
+
+/* ---- Controls --------------------------------------------------------------- */
+
+.icon-button {
+  display: inline-grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.icon-button:hover:not(:disabled) {
+  background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.2));
+}
+
+.icon-button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.text-button,
+.link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--link);
+  cursor: pointer;
+  text-align: left;
+}
+
+.text-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  justify-self: start;
+}
+
+.text-button:hover,
+.link:hover {
+  text-decoration: underline;
+}
+
+.button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border: 1px solid var(--vscode-button-border, transparent);
+  border-radius: 2px;
+  cursor: pointer;
+}
+
+.button.primary {
+  background: var(--vscode-button-background);
+  color: var(--vscode-button-foreground);
+}
+
+.button.primary:hover {
+  background: var(--vscode-button-hoverBackground);
+}
+
+.button.secondary {
+  background: var(--vscode-button-secondaryBackground);
+  color: var(--vscode-button-secondaryForeground);
+}
+
+.button.secondary:hover:not(:disabled) {
+  background: var(--vscode-button-secondaryHoverBackground);
+}
+
+.button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.button .icon {
+  fill: currentColor;
+}
+
+button:focus-visible,
+input:focus-visible,
+summary:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+  margin-bottom: 8px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+}
+
+.speeds {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.speed {
+  padding: 2px 7px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-variant-numeric: tabular-nums;
+}
+
+.speed[aria-pressed="true"] {
+  background: var(--vscode-button-secondaryBackground);
+  color: var(--vscode-button-secondaryForeground);
+}
+
+#scrub {
+  flex: 1 1 140px;
+  min-width: 100px;
+  accent-color: var(--accent);
+}
+
+.progress {
+  min-width: 7ch;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- Banners ---------------------------------------------------------------- */
+
+.banner {
+  display: flex;
+  gap: 10px;
+  padding: 8px 12px;
+  margin-bottom: 8px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  border-left-width: 3px;
+}
+
+.banner.warn {
+  border-left-color: var(--warn);
+  background: var(--vscode-inputValidation-warningBackground, transparent);
+}
+
+.banner.warn > .icon {
+  color: var(--warn);
+  margin-top: 2px;
+}
+
+.banner.info {
+  border-left-color: var(--accent);
+  color: var(--muted);
+}
+
+.banner-text {
+  margin-top: 2px;
+}
+
+.banner-files {
+  margin: 6px 0 0;
+  padding-left: 18px;
+}
+
+.banner-files .link {
+  font-family: var(--vscode-editor-font-family);
+}
+
+/* ---- Layout ----------------------------------------------------------------- */
+
+.main {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 300px);
+  gap: 24px;
+  align-items: start;
+}
+
+@media (max-width: 760px) {
+  .main {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .files {
+    position: static;
+    order: -1;
+  }
+}
+
+/* ---- Flow ------------------------------------------------------------------- */
+
+.flow,
+.lane {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+/* Subagent steps hang off their parent on a dashed lane. */
+.lane {
+  margin-left: calc(var(--gutter) - 1px);
+  padding-left: 18px;
+  border-left: 2px dashed color-mix(in srgb, var(--c-agent) 55%, transparent);
+}
+
+.node {
+  --kind: var(--c-other);
+  position: relative;
+  padding-top: 16px;
+  transition: opacity 0.35s ease, transform 0.35s ease;
+}
+
+/* Connector from the previous node. */
+.node::before {
+  content: "";
+  position: absolute;
+  left: calc(var(--gutter) - 1px);
+  top: 0;
+  width: 2px;
+  height: 16px;
+  background: var(--line);
+}
+
+.flow > .item:first-child > .node {
+  padding-top: 0;
+}
+
+.flow > .item:first-child > .node::before {
+  display: none;
+}
+
+.lane > .item:first-child > .node::before {
+  display: none;
+}
+
+.card {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 7px 10px 7px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--card);
+  transition: box-shadow 0.25s ease, border-color 0.25s ease;
+}
+
+.badge {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  flex: none;
+  border-radius: 50%;
+  color: var(--kind);
+  background: color-mix(in srgb, var(--kind) 16%, transparent);
+  border: 1px solid color-mix(in srgb, var(--kind) 45%, transparent);
+}
+
+.card-body {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+  padding-top: 4px;
+}
+
+.card-title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.kind {
+  flex: none;
+  color: var(--kind);
+  font-size: 0.8em;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.card-title .link.title {
+  font-family: var(--vscode-editor-font-family);
+}
+
+.kind-command .title {
+  font-family: var(--vscode-editor-font-family);
+}
+
+.message-text {
+  white-space: pre-wrap;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.message-text.expanded {
+  -webkit-line-clamp: unset;
+}
+
+.time {
+  flex: none;
+  padding-top: 5px;
+  color: var(--muted);
+  font-size: 0.85em;
+  font-variant-numeric: tabular-nums;
+}
+
+.meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  color: var(--muted);
+  font-size: 0.9em;
+}
+
+.note {
+  color: var(--muted);
+}
+
+.status {
+  padding: 0 6px;
+  border-radius: 8px;
+  font-size: 0.85em;
+  border: 1px solid currentColor;
+}
+
+.status-error,
+.status-interrupted {
+  color: var(--error);
+}
+
+.status-rejected,
+.status-user {
+  color: var(--warn);
+}
+
+.status-running {
+  color: var(--c-running);
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  padding: 0 6px;
+  border-radius: 3px;
+  border: 1px solid var(--border);
+  color: var(--fg);
+  font-family: var(--vscode-editor-font-family);
+  font-size: 0.95em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chip.link:hover {
+  text-decoration: none;
+  border-color: var(--accent);
+}
+
+.chip-search {
+  color: var(--muted);
+}
+
+.outcome-unchanged,
+.outcome-ignored,
+.outcome-outside {
+  opacity: 0.6;
+  text-decoration: line-through;
+}
+
+.detail summary {
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 0.9em;
+}
+
+.detail pre {
+  margin: 4px 0 0;
+  padding: 6px 8px;
+  max-height: 240px;
+  overflow: auto;
+  border-radius: 4px;
+  background: var(--vscode-textCodeBlock-background, rgba(128, 128, 128, 0.12));
+  font-family: var(--vscode-editor-font-family);
+  font-size: var(--vscode-editor-font-size, 0.95em);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.note-card {
+  margin-left: calc(var(--gutter) + 20px);
+  color: var(--muted);
+}
+
+/* Per-kind color for the badge and label. */
+.kind-read { --kind: var(--c-read); }
+.kind-search { --kind: var(--c-search); }
+.kind-explore { --kind: var(--c-explore); }
+.kind-edit { --kind: var(--c-edit); }
+.kind-write { --kind: var(--c-write); }
+.kind-delete { --kind: var(--c-delete); }
+.kind-command { --kind: var(--c-command); }
+.kind-agent { --kind: var(--c-agent); }
+.kind-web { --kind: var(--c-web); }
+.kind-message { --kind: var(--c-message); }
+.kind-prompt { --kind: var(--c-prompt); }
+.kind-result { --kind: var(--c-result); }
+.kind-running { --kind: var(--c-running); }
+
+.kind-prompt .card {
+  border-color: color-mix(in srgb, var(--c-prompt) 45%, var(--border));
+}
+
+.kind-message .card {
+  background: transparent;
+  border-style: dashed;
+}
+
+.status-error .badge,
+.status-interrupted .badge {
+  --kind: var(--error);
+}
+
+.status-rejected .badge {
+  --kind: var(--warn);
+}
+
+.status-running .badge .icon {
+  animation: spin 1s linear infinite;
+}
+
+/* ---- Replay states ------------------------------------------------------------ */
+
+.replaying .node.future {
+  opacity: 0.14;
+  transform: translateY(6px);
+}
+
+.replaying .node.active .card {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent), 0 0 16px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+/* The connector into the active node shows data flowing down. */
+.replaying .node.active::before {
+  background: repeating-linear-gradient(to bottom, var(--accent) 0 4px, transparent 4px 8px);
+  background-size: 2px 8px;
+  animation: flow 0.45s linear infinite;
+}
+
+.replaying .node.active .badge {
+  animation: pop 0.4s ease-out;
+}
+
+.flow-wrap.focusing .node:not(.linked) {
+  opacity: 0.3;
+}
+
+.node.linked .card {
+  border-color: var(--accent);
+}
+
+/* ---- Files panel -------------------------------------------------------------- */
+
+.files {
+  position: sticky;
+  top: 52px;
+  max-height: calc(100vh - 64px);
+  overflow: auto;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--card);
+}
+
+.files h2 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 4px 0 6px;
+  font-size: 0.85em;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.files section + section {
+  margin-top: 12px;
+}
+
+.count {
+  padding: 0 6px;
+  border-radius: 8px;
+  background: var(--vscode-badge-background);
+  color: var(--vscode-badge-foreground);
+  font-size: 0.95em;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.file-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.file {
+  border-radius: 4px;
+  transition: opacity 0.3s ease;
+}
+
+.file-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 3px 6px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+}
+
+.file-row:hover,
+.file.linked .file-row {
+  background: var(--vscode-list-hoverBackground, rgba(128, 128, 128, 0.15));
+}
+
+.file-name {
+  flex: none;
+  max-width: 60%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-dir {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font-size: 0.9em;
+  direction: rtl;
+  text-align: left;
+}
+
+.file.outside .file-name {
+  color: var(--muted);
+}
+
+.letter {
+  flex: none;
+  width: 1.2em;
+  font-family: var(--vscode-editor-font-family);
+  font-weight: 700;
+  text-align: center;
+}
+
+.change-created { color: var(--added); }
+.change-modified { color: var(--modified); }
+.change-deleted { color: var(--deleted); }
+.change-read { color: var(--c-read); }
+
+.flag {
+  display: inline-flex;
+  color: var(--warn);
+}
+
+.delta {
+  display: inline-flex;
+  gap: 4px;
+  flex: none;
+  font-family: var(--vscode-editor-font-family);
+  font-size: 0.9em;
+}
+
+.added { color: var(--added); }
+.removed { color: var(--deleted); }
+
+.file.untouched {
+  opacity: 0.35;
+}
+
+.file.pulse-read {
+  animation: pulse-read 0.9s ease-out;
+}
+
+.file.pulse-write {
+  animation: pulse-write 0.9s ease-out;
+}
+
+/* ---- Animations --------------------------------------------------------------- */
+
+@keyframes flow {
+  to {
+    background-position: 0 8px;
+  }
+}
+
+@keyframes pop {
+  0% { transform: scale(0.7); }
+  60% { transform: scale(1.12); }
+  100% { transform: scale(1); }
+}
+
+@keyframes pulse-read {
+  0% { background: color-mix(in srgb, var(--c-read) 35%, transparent); }
+  100% { background: transparent; }
+}
+
+@keyframes pulse-write {
+  0% { background: color-mix(in srgb, var(--c-edit) 40%, transparent); }
+  100% { background: transparent; }
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes blink {
+  50% {
+    opacity: 0.3;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before {
+    animation: none !important;
+    transition: none !important;
+  }
+}
